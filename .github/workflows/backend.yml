@@ -31,11 +31,17 @@ jobs:
 
       - name: 린트 검사 (flake8)
         working-directory: backend
-        run: flake8 . --max-line-length=100 --exclude=__pycache__
+        run: |
+          flake8 user-service mail-service news-fetcher-service news-summarizer-service \
+            --max-line-length=100 --exclude=__pycache__,tests
 
       - name: 테스트 실행 (pytest)
         working-directory: backend
-        run: pytest tests/ -v
+        run: |
+          pytest user-service/tests -v
+          pytest mail-service/tests -v
+          pytest news-fetcher-service/tests -v
+          pytest news-summarizer-service/tests -v
 
       - name: 도커 빌드 확인
         run: docker build -t news-crawler:test ./backend
