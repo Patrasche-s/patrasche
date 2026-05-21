@@ -5,23 +5,10 @@ Ports: User 8000, Mail 8002, Summarizer 8004 (문서 기준).
 
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
-_SERVICE_DIR = Path(__file__).resolve().parents[1]
-
-_user_db_dir = tempfile.mkdtemp(prefix="user-ci-")
-_user_db_path = Path(_user_db_dir) / "user_test.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_user_db_path.as_posix()}")
-
-sys.path.insert(0, str(_SERVICE_DIR))
-
-from main import app  # noqa: E402
+from main import app  # noqa: E402 — conftest.py에서 migrate 후 로드
 
 
 @pytest.fixture()

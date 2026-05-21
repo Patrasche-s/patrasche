@@ -7,3 +7,4 @@ email-validator>=2.2.0
 httpx>=0.28.0
 apscheduler
 pytest>=8.0.0
+alembic>=1.14.0
