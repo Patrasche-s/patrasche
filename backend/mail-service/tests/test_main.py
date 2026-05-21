@@ -6,35 +6,13 @@ Service ports (문서·환경 기준): User 8000, Mail 8002, Summarizer 8004.
 
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-_SERVICE_DIR = Path(__file__).resolve().parents[1]
-
-_mail_db_dir = tempfile.mkdtemp(prefix="mail-ci-")
-_mail_db_path = Path(_mail_db_dir) / "mail_test.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_mail_db_path.as_posix()}")
-
-for _key, _value in {
-    "SMTP_HOST": "localhost",
-    "SMTP_USER": "ci_user",
-    "SMTP_PASS": "ci_pass",
-    "MAIL_FROM": "ci@example.com",
-    "USER_SERVICE_URL": "http://localhost:8000",
-    "NEWS_DATA_SERVICE_URL": "http://localhost:8004",
-}.items():
-    os.environ.setdefault(_key, _value)
-
-sys.path.insert(0, str(_SERVICE_DIR))
-
-import main as mail_main  # noqa: E402
+import main as mail_main  # noqa: E402 — conftest.py applied migrations first
 
 app = mail_main.app
 

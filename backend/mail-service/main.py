@@ -16,7 +16,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from database import Base, SessionLocal, engine, get_db
+from database import SessionLocal, get_db
 from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
@@ -471,18 +471,6 @@ def _configure_scheduler_jobs():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    try:
-        Base.metadata.create_all(bind=engine)
-    except OperationalError as exc:
-        logger.critical(
-            "DB 연결에 실패했습니다",
-            extra={
-                "event": "database_connection_failed",
-                "error": str(exc),
-                "error_type": "OperationalError",
-            },
-        )
-        raise
     job = _configure_scheduler_jobs()
     if not scheduler.running:
         scheduler.start()
