@@ -24,6 +24,7 @@ from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
     reset_trace_id,
+    resolve_request_trace_id,
     set_trace_id,
     setup_service_logging,
     uvicorn_log_config,
@@ -99,15 +100,19 @@ async def lifespan(_app: FastAPI):
         ensure_news_schema()
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "error": str(exc)},
+            "DB 연결에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     interval_minutes = _configure_scheduler_jobs()
     if not scheduler.running:
         scheduler.start()
     logger.info(
-        "service_startup",
+        "뉴스 요약 서비스가 시작되었습니다",
         extra={
             "event": "service_startup",
             "scheduler_timezone": str(SCHEDULER_TIMEZONE),
@@ -126,12 +131,11 @@ app = FastAPI(title="News Summarizer Service", version="0.1.0", lifespan=lifespa
 
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or request.headers.get("traceparent")
+    trace_id = resolve_request_trace_id(request.headers.get("x-trace-id"))
     token = set_trace_id(trace_id)
     try:
         response = await call_next(request)
-        if trace_id:
-            response.headers["x-trace-id"] = trace_id
+        response.headers["x-trace-id"] = trace_id
         return response
     finally:
         reset_trace_id(token)
@@ -157,7 +161,7 @@ class SummarizeResponse(BaseModel):
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    logger.info("health_check", extra={"event": "health_check"})
+    logger.info("헬스체크 정상", extra={"event": "health_check"})
     return {"status": "ok"}
 
 

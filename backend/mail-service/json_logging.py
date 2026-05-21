@@ -1,42 +1,13 @@
 from __future__ import annotations
 
 import contextvars
-import json
 import logging
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
-
-_SKIP = frozenset(
-    {
-        "name",
-        "msg",
-        "args",
-        "levelname",
-        "levelno",
-        "pathname",
-        "filename",
-        "module",
-        "lineno",
-        "funcName",
-        "created",
-        "msecs",
-        "relativeCreated",
-        "thread",
-        "threadName",
-        "processName",
-        "process",
-        "exc_info",
-        "exc_text",
-        "stack_info",
-        "getMessage",
-        "message",
-        "taskName",
-    }
-)
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "trace_id",
@@ -47,12 +18,41 @@ _service_name_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     default=None,
 )
 
+_DB_ERROR_NAMES = frozenset({"OperationalError", "DatabaseError"})
+_DB_EVENTS = frozenset({"database_connection_failed"})
+_CRON_EVENT_PREFIXES = (
+    "scheduler_",
+    "newsletter_batch",
+    "pipeline_",
+    "category_batch",
+    "category_no_items",
+    "category_fetch_stats",
+    "category_pipeline_failed",
+)
+
 _SENSITIVE_KEY_RE = re.compile(
     r'(?i)(("?(?:password|token|authorization|secret|api[_-]?key)"?\s*[:=]\s*")([^"]+)("))'
 )
 _SENSITIVE_INLINE_RE = re.compile(
     r"(?i)\b(password|token|authorization|secret|api[_-]?key)\b(\s*[:=]\s*)([^\s,}\]]+)"
 )
+
+SCHEDULER_TIMEZONE = ZoneInfo("Asia/Seoul")
+
+_SCHEDULER_MESSAGES = {
+    "scheduler_started": "스케줄러가 시작되었습니다",
+    "scheduler_shutdown": "스케줄러가 종료되었습니다",
+    "scheduler_job_start": "배치 작업이 시작되었습니다",
+    "scheduler_job_success": "배치 작업이 완료되었습니다",
+    "scheduler_job_failure": "배치 작업이 실패했습니다",
+}
+
+
+def resolve_request_trace_id(header_value: str | None) -> str:
+    raw = (header_value or "").strip()
+    if raw:
+        return raw
+    return f"req-{uuid.uuid4().hex[:12]}"
 
 
 def set_trace_id(trace_id: str | None) -> contextvars.Token[str | None]:
@@ -76,40 +76,70 @@ def _mask_sensitive_text(text: str) -> str:
     return _SENSITIVE_INLINE_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}***", text)
 
 
-def _mask_sensitive_value(key: str, value: Any) -> Any:
-    lowered = key.lower()
-    if any(word in lowered for word in ("password", "token", "authorization", "secret", "api_key", "apikey")):
-        return "***"
-    if isinstance(value, dict):
-        return {str(k): _mask_sensitive_value(str(k), v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_mask_sensitive_value(key, item) for item in value]
-    return value
+def _is_db_related(record: logging.LogRecord) -> bool:
+    event = getattr(record, "event", "")
+    if event in _DB_EVENTS:
+        return True
+    error_type = getattr(record, "error_type", "")
+    if error_type in _DB_ERROR_NAMES:
+        return True
+    if record.exc_info and record.exc_info[0] is not None:
+        if record.exc_info[0].__name__ in _DB_ERROR_NAMES:
+            return True
+    return False
 
 
-class JsonFormatter(logging.Formatter):
+def _is_cron_related(record: logging.LogRecord) -> bool:
+    if getattr(record, "actor_type", None) == "SYSTEM-CRON":
+        return True
+    event = getattr(record, "event", "")
+    if not isinstance(event, str):
+        return False
+    if event.startswith("scheduler_"):
+        return True
+    return any(event.startswith(prefix) for prefix in _CRON_EVENT_PREFIXES)
+
+
+def _resolve_context(record: logging.LogRecord) -> str:
+    user_email = getattr(record, "user_email", None)
+    if user_email:
+        return f"User: {user_email}"
+
+    if _is_cron_related(record):
+        return "SYSTEM-CRON"
+
+    if _is_db_related(record):
+        return "SYSTEM-DB"
+
+    trace_id = _trace_id_var.get()
+    if trace_id:
+        return trace_id
+    return "req-unknown"
+
+
+class BracketFormatter(logging.Formatter):
+    def __init__(self) -> None:
+        super().__init__(
+            fmt="[%(asctime)s] [%(context)s] [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        dt = datetime.fromtimestamp(record.created, tz=SCHEDULER_TIMEZONE)
+        return dt.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
     def format(self, record: logging.LogRecord) -> str:
-        service_name = _service_name_var.get() or getattr(record, "service", None) or record.name
-        payload: dict[str, Any] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "service": service_name,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-        trace_id = _trace_id_var.get()
-        if trace_id:
-            payload["trace_id"] = trace_id
+        record.context = _resolve_context(record)
+        message = _mask_sensitive_text(record.getMessage())
+        record.msg = message
+        record.args = ()
+        line = super().format(record)
+        line = _mask_sensitive_text(line)
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info).rstrip()
-        for key, value in record.__dict__.items():
-            if key in _SKIP or key in {"service", "trace_id"} or key.startswith("_"):
-                continue
-            payload[key] = _mask_sensitive_value(str(key), value)
-        return _mask_sensitive_text(json.dumps(payload, ensure_ascii=False, default=str))
-
-
-SCHEDULER_TIMEZONE = ZoneInfo("Asia/Seoul")
+            exc_text = self.formatException(record.exc_info).rstrip()
+            if exc_text:
+                line = f"{line}\n{_mask_sensitive_text(exc_text)}"
+        return line
 
 
 def setup_service_logging(service_name: str) -> logging.Logger:
@@ -119,38 +149,9 @@ def setup_service_logging(service_name: str) -> logging.Logger:
     log.setLevel(logging.INFO)
     log.propagate = False
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(BracketFormatter())
     log.addHandler(handler)
     return log
-
-
-def _serialize_log_value(value: Any) -> Any:
-    if isinstance(value, (list, tuple)):
-        return [_serialize_log_value(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _serialize_log_value(item) for key, item in value.items()}
-    if hasattr(value, "isoformat"):
-        try:
-            return value.isoformat()
-        except Exception:
-            return str(value)
-    return value
-
-
-def _format_scheduler_datetime(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, (list, tuple)):
-        return [_format_scheduler_datetime(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _format_scheduler_datetime(item) for key, item in value.items()}
-    if hasattr(value, "astimezone"):
-        try:
-            localized = value.astimezone(SCHEDULER_TIMEZONE)
-            return localized.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            return str(value)
-    return value
 
 
 def register_scheduler_logging(
@@ -167,111 +168,65 @@ def register_scheduler_logging(
         EVENT_SCHEDULER_STARTED,
     )
 
-    if getattr(scheduler, "_json_scheduler_logging_registered", False):
+    if getattr(scheduler, "_bracket_scheduler_logging_registered", False):
         return
 
-    scheduler_trace_ids: dict[str, str] = {}
+    def _cron_extra(job_id: str, event: str, **fields: Any) -> dict[str, Any]:
+        extra: dict[str, Any] = {
+            "actor_type": "SYSTEM-CRON",
+            "job_id": job_id,
+            "event": event,
+        }
+        extra.update(fields)
+        return extra
 
     def _listener(event: Any) -> None:
-        jobs = scheduler.get_jobs()
-        next_run_times = {
-            job.id: _format_scheduler_datetime(getattr(job, "next_run_time", None))
-            for job in jobs
-        }
-        next_run_time = next(
-            (run_time for run_time in next_run_times.values() if run_time is not None),
-            None,
-        )
-        base_extra = {
-            "timezone": str(getattr(scheduler, "timezone", SCHEDULER_TIMEZONE)),
-            "scheduler_timezone": str(getattr(scheduler, "timezone", SCHEDULER_TIMEZONE)),
-            "next_run_time": next_run_time,
-            "next_run_times": next_run_times,
-        }
-
         if event.code == EVENT_SCHEDULER_STARTED:
             logger.info(
-                "scheduler_started",
-                extra={
-                    "event": "scheduler_started",
-                    "job_count": len(jobs),
-                    **base_extra,
-                },
+                _SCHEDULER_MESSAGES["scheduler_started"],
+                extra=_cron_extra("-", "scheduler_started"),
             )
             return
 
         if event.code == EVENT_SCHEDULER_SHUTDOWN:
             logger.info(
-                "scheduler_shutdown",
-                extra={"event": "scheduler_shutdown", **base_extra},
+                _SCHEDULER_MESSAGES["scheduler_shutdown"],
+                extra=_cron_extra("-", "scheduler_shutdown"),
             )
             return
 
+        job_id = str(getattr(event, "job_id", "unknown"))
+
         if event.code == EVENT_JOB_SUBMITTED:
-            job_id = str(getattr(event, "job_id", "unknown"))
-            trace_id = f"cron-{uuid.uuid4().hex[:12]}"
-            scheduler_trace_ids[job_id] = trace_id
-            set_trace_id(trace_id)
             logger.info(
-                "scheduler_job_start",
-                extra={
-                    "event": "scheduler_job_start",
-                    "job_id": job_id,
-                    "scheduled_run_times": _format_scheduler_datetime(
-                        getattr(event, "scheduled_run_times", None)
-                    ),
-                    **base_extra,
-                },
+                _SCHEDULER_MESSAGES["scheduler_job_start"],
+                extra=_cron_extra(job_id, "scheduler_job_start"),
             )
             return
 
         if event.code == EVENT_JOB_EXECUTED:
-            job_id = str(getattr(event, "job_id", "unknown"))
-            set_trace_id(scheduler_trace_ids.pop(job_id, None))
-            try:
-                logger.info(
-                    "scheduler_job_success",
-                    extra={
-                        "event": "scheduler_job_success",
-                        "job_id": job_id,
-                        "scheduled_run_time": _format_scheduler_datetime(
-                            getattr(event, "scheduled_run_time", None)
-                        ),
-                        "job_result": _serialize_log_value(getattr(event, "retval", None)),
-                        **base_extra,
-                    },
-                )
-            finally:
-                set_trace_id(None)
+            logger.info(
+                _SCHEDULER_MESSAGES["scheduler_job_success"],
+                extra=_cron_extra(job_id, "scheduler_job_success"),
+            )
             return
 
         if event.code == EVENT_JOB_ERROR:
-            job_id = str(getattr(event, "job_id", "unknown"))
-            set_trace_id(scheduler_trace_ids.pop(job_id, None))
             exception = getattr(event, "exception", None)
             exception_name = type(exception).__name__ if exception is not None else ""
-            log_method = (
-                logger.critical
-                if "OperationalError" in exception_name or "DatabaseError" in exception_name
-                else logger.error
-            )
-            try:
-                log_method(
+            log_method = logger.critical if exception_name in _DB_ERROR_NAMES else logger.error
+            message = _SCHEDULER_MESSAGES["scheduler_job_failure"]
+            if exception_name:
+                message = f"{message} ({exception_name})"
+            log_method(
+                message,
+                extra=_cron_extra(
+                    job_id,
                     "scheduler_job_failure",
-                    extra={
-                        "event": "scheduler_job_failure",
-                        "job_id": job_id,
-                        "scheduled_run_time": _format_scheduler_datetime(
-                            getattr(event, "scheduled_run_time", None)
-                        ),
-                        "error": str(exception or ""),
-                        "error_type": exception_name,
-                        "traceback": getattr(event, "traceback", None),
-                        **base_extra,
-                    },
-                )
-            finally:
-                set_trace_id(None)
+                    error=str(exception or ""),
+                    error_type=exception_name,
+                ),
+            )
 
     scheduler.add_listener(
         _listener,
@@ -281,20 +236,21 @@ def register_scheduler_logging(
         | EVENT_JOB_EXECUTED
         | EVENT_JOB_ERROR,
     )
-    setattr(scheduler, "_json_scheduler_logging_registered", True)
+    setattr(scheduler, "_bracket_scheduler_logging_registered", True)
 
 
 def uvicorn_log_config() -> dict[str, Any]:
+    """uvicorn.run(log_config=...) — 앱과 동일한 3브래킷 평문 포맷."""
     return {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "json": {"()": "json_logging.JsonFormatter"},
+            "bracket": {"()": "json_logging.BracketFormatter"},
         },
         "handlers": {
             "default": {
                 "class": "logging.StreamHandler",
-                "formatter": "json",
+                "formatter": "bracket",
                 "stream": "ext://sys.stdout",
             },
         },

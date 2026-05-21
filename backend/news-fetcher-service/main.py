@@ -20,8 +20,10 @@ from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
     reset_trace_id,
+    resolve_request_trace_id,
     set_trace_id,
     setup_service_logging,
+    uvicorn_log_config,
 )
 
 _SERVICE_DIR = Path(__file__).resolve().parent
@@ -580,12 +582,11 @@ app = FastAPI(title="News Fetcher Service", version="0.1.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or request.headers.get("traceparent")
+    trace_id = resolve_request_trace_id(request.headers.get("x-trace-id"))
     token = set_trace_id(trace_id)
     try:
         response = await call_next(request)
-        if trace_id:
-            response.headers["x-trace-id"] = trace_id
+        response.headers["x-trace-id"] = trace_id
         return response
     finally:
         reset_trace_id(token)
@@ -614,4 +615,5 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=False,
+        log_config=uvicorn_log_config(),
     )

@@ -21,6 +21,7 @@ from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
     reset_trace_id,
+    resolve_request_trace_id,
     set_trace_id,
     setup_service_logging,
     uvicorn_log_config,
@@ -267,7 +268,7 @@ async def _send_html_email(
     )
 
     logger.info(
-        "mail_send_attempt",
+        "메일 발송을 시도합니다",
         extra={
             "event": "mail_send_attempt",
             "user_email": recipient,
@@ -474,8 +475,12 @@ async def lifespan(_app: FastAPI):
         Base.metadata.create_all(bind=engine)
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "error": str(exc)},
+            "DB 연결에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     job = _configure_scheduler_jobs()
@@ -504,12 +509,11 @@ app = FastAPI(title="Mail Service", version="0.1.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or request.headers.get("traceparent")
+    trace_id = resolve_request_trace_id(request.headers.get("x-trace-id"))
     token = set_trace_id(trace_id)
     try:
         response = await call_next(request)
-        if trace_id:
-            response.headers["x-trace-id"] = trace_id
+        response.headers["x-trace-id"] = trace_id
         return response
     finally:
         reset_trace_id(token)

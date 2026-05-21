@@ -17,6 +17,7 @@ from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
     reset_trace_id,
+    resolve_request_trace_id,
     set_trace_id,
     setup_service_logging,
     uvicorn_log_config,
@@ -82,15 +83,19 @@ async def lifespan(_app: FastAPI):
         Base.metadata.create_all(bind=engine)
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "error": str(exc)},
+            "DB 연결에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     interval_minutes = _configure_scheduler_jobs()
     if not scheduler.running:
         scheduler.start()
     logger.info(
-        "User service started and DB initialized",
+        "유저 서비스가 시작되었습니다",
         extra={
             "event": "service_startup",
             "scheduler_timezone": str(SCHEDULER_TIMEZONE),
@@ -109,12 +114,11 @@ app = FastAPI(title="User Service", version="0.1.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or request.headers.get("traceparent")
+    trace_id = resolve_request_trace_id(request.headers.get("x-trace-id"))
     token = set_trace_id(trace_id)
     try:
         response = await call_next(request)
-        if trace_id:
-            response.headers["x-trace-id"] = trace_id
+        response.headers["x-trace-id"] = trace_id
         return response
     finally:
         reset_trace_id(token)
@@ -134,7 +138,7 @@ def _deserialize_categories(category_csv: str) -> list[str]:
 @app.get("/health")
 def health_check():
     logger.info(
-        "Health check requested",
+        "헬스체크 정상",
         extra={"event": "health_check_requested"},
     )
     return {"status": "ok"}
@@ -152,8 +156,13 @@ def internal_subscribers(db: Session = Depends(get_db)):
         )
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "internal_subscribers", "error": str(exc)},
+            "DB 조회에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "internal_subscribers",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     return [
@@ -171,7 +180,7 @@ def _format_categories_for_popup(categories: list[str]) -> str:
 
 async def send_verification_email(email: str, token: str) -> None:
     logger.info(
-        "Verification email dispatch started",
+        "인증 메일 발송을 시작합니다",
         extra={"event": "verification_email_send_attempt", "user_email": email},
     )
     try:
@@ -185,7 +194,7 @@ async def send_verification_email(email: str, token: str) -> None:
     except httpx.HTTPStatusError as exc:
         sc = exc.response.status_code if exc.response is not None else None
         logger.error(
-            "Verification email HTTP error",
+            "인증 메일 발송 HTTP 오류",
             extra={
                 "event": "verification_email_send_failure",
                 "user_email": email,
@@ -196,7 +205,7 @@ async def send_verification_email(email: str, token: str) -> None:
         raise
     except httpx.RequestError as exc:
         logger.error(
-            "Verification email transport error",
+            "인증 메일 발송 네트워크 오류",
             extra={
                 "event": "verification_email_send_failure",
                 "user_email": email,
@@ -206,7 +215,7 @@ async def send_verification_email(email: str, token: str) -> None:
         raise
 
     logger.info(
-        "Verification email sent successfully",
+        "인증 메일 발송 성공",
         extra={
             "event": "verification_email_send_success",
             "user_email": email,
@@ -226,20 +235,25 @@ async def subscribe(
     db: Session = Depends(get_db),
 ):
     logger.info(
-        "Subscribe request received",
+        "구독 요청을 받았습니다",
         extra={"event": "subscribe_request_received", "user_email": payload.email},
     )
     try:
         existing = db.query(Subscription).filter(Subscription.email == payload.email).first()
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "subscribe_lookup", "error": str(exc)},
+            "DB 조회에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "subscribe_lookup",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     if existing:
         logger.warning(
-            "Duplicate subscription attempt",
+            "이미 구독된 이메일입니다",
             extra={"event": "subscribe_duplicate_email", "user_email": payload.email},
         )
         raise HTTPException(
@@ -249,7 +263,7 @@ async def subscribe(
 
     verification_token = secrets.token_urlsafe(32)
     logger.info(
-        "Verification token generated",
+        "인증 토큰이 생성되었습니다",
         extra={
             "event": "verification_token_generated",
             "user_email": payload.email,
@@ -260,7 +274,7 @@ async def subscribe(
     category_csv = _serialize_categories(payload.category)
     if not category_csv:
         logger.warning(
-            "Empty category in subscribe request",
+            "구독 카테고리가 비어 있습니다",
             extra={"event": "subscribe_empty_category", "user_email": payload.email},
         )
         raise HTTPException(
@@ -280,8 +294,13 @@ async def subscribe(
     except OperationalError as exc:
         db.rollback()
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "subscribe_commit", "error": str(exc)},
+            "DB 저장에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "subscribe_commit",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -290,7 +309,7 @@ async def subscribe(
     except Exception:
         db.rollback()
         logger.exception(
-            "Failed to persist subscription",
+            "구독 정보 저장에 실패했습니다",
             extra={"event": "subscription_persist_failed", "user_email": payload.email},
         )
         raise HTTPException(
@@ -300,7 +319,7 @@ async def subscribe(
 
     background_tasks.add_task(send_verification_email, payload.email, verification_token)
     logger.info(
-        "Subscription created and verification email queued",
+        "구독이 완료되었고 인증 메일이 대기열에 등록되었습니다",
         extra={
             "event": "subscription_created_verification_queued",
             "user_email": payload.email,
@@ -318,20 +337,25 @@ async def subscribe(
 @app.get("/verify")
 def verify_subscription(email: str, token: str, db: Session = Depends(get_db)):
     logger.info(
-        "Verify request received",
+        "이메일 인증 요청을 받았습니다",
         extra={"event": "verify_request_received", "user_email": email},
     )
     try:
         subscriber = db.query(Subscription).filter(Subscription.email == email).first()
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "verify_lookup", "error": str(exc)},
+            "DB 조회에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "verify_lookup",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     if not subscriber:
         logger.warning(
-            "Verify failed - subscriber not found",
+            "구독자를 찾을 수 없습니다",
             extra={"event": "verify_subscriber_not_found", "user_email": email},
         )
         raise HTTPException(
@@ -341,7 +365,7 @@ def verify_subscription(email: str, token: str, db: Session = Depends(get_db)):
 
     if subscriber.verification_token != token:
         logger.warning(
-            "Verify failed - invalid token",
+            "유효하지 않은 인증 토큰입니다",
             extra={"event": "verify_invalid_token", "user_email": email},
         )
         raise HTTPException(
@@ -356,20 +380,25 @@ def verify_subscription(email: str, token: str, db: Session = Depends(get_db)):
         except OperationalError as exc:
             db.rollback()
             logger.critical(
-                "database_connection_failed",
-                extra={"event": "database_connection_failed", "operation": "verify_commit", "error": str(exc)},
+                "DB 저장에 실패했습니다",
+                extra={
+                    "event": "database_connection_failed",
+                    "operation": "verify_commit",
+                    "error": str(exc),
+                    "error_type": "OperationalError",
+                },
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="DB 연결에 실패했습니다.",
             ) from exc
         logger.info(
-            "Subscriber verified successfully",
+            "이메일 인증이 완료되었습니다",
             extra={"event": "verify_success", "user_email": email},
         )
     else:
         logger.info(
-            "Verify requested for already-verified subscriber",
+            "이미 인증된 구독자입니다",
             extra={"event": "verify_already_verified", "user_email": email},
         )
 

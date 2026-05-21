@@ -83,8 +83,13 @@ def ensure_news_schema() -> None:
         existing = {c["name"] for c in insp.get_columns("summarized_news")}
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "ensure_news_schema", "error": str(exc)},
+            "DB 스키마 확인에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "ensure_news_schema",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     optional = {
@@ -99,8 +104,13 @@ def ensure_news_schema() -> None:
                     conn.execute(text(f"ALTER TABLE summarized_news ADD COLUMN {col} {typ}"))
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "ensure_news_schema_alter", "error": str(exc)},
+            "DB 스키마 변경에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "ensure_news_schema_alter",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
 
@@ -128,8 +138,13 @@ def save_news(news_data: Dict[str, Any]) -> bool:
         except OperationalError as exc:
             session.rollback()
             logger.critical(
-                "database_connection_failed",
-                extra={"event": "database_connection_failed", "operation": "save_news", "error": str(exc)},
+                "DB 저장에 실패했습니다",
+                extra={
+                    "event": "database_connection_failed",
+                    "operation": "save_news",
+                    "error": str(exc),
+                    "error_type": "OperationalError",
+                },
             )
             raise
         except IntegrityError:
@@ -148,8 +163,13 @@ def get_existing_links(links: List[str]) -> Set[str]:
             ).all()
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "get_existing_links", "error": str(exc)},
+            "DB 조회에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "get_existing_links",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
     return {str(link) for link in found}
@@ -200,8 +220,13 @@ def list_newsletter_rows_for_batch(batch_date: date) -> List[Dict[str, Any]]:
             return [_mapping_row(r) for r in rows2]
     except OperationalError as exc:
         logger.critical(
-            "database_connection_failed",
-            extra={"event": "database_connection_failed", "operation": "list_newsletter_rows_for_batch", "error": str(exc)},
+            "DB 조회에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "list_newsletter_rows_for_batch",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
         )
         raise
 
