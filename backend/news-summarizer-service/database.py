@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Set
 
 from dotenv import load_dotenv
-from sqlalchemy import DateTime, Index, String, Text, create_engine, func, inspect, select, text
+from sqlalchemy import DateTime, Index, String, Text, create_engine, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -72,47 +72,6 @@ class SummarizedNews(Base):
     batch_date_kst: Mapped[str | None] = mapped_column(String(32), nullable=True)
     scheduled_run_time_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
     collected_at_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-
-def ensure_news_schema() -> None:
-    """기존 SQLite 등에 누락된 컬럼만 추가."""
-    try:
-        insp = inspect(engine)
-        if not insp.has_table("summarized_news"):
-            return
-        existing = {c["name"] for c in insp.get_columns("summarized_news")}
-    except OperationalError as exc:
-        logger.critical(
-            "DB 스키마 확인에 실패했습니다",
-            extra={
-                "event": "database_connection_failed",
-                "operation": "ensure_news_schema",
-                "error": str(exc),
-                "error_type": "OperationalError",
-            },
-        )
-        raise
-    optional = {
-        "batch_date_kst": "TEXT",
-        "scheduled_run_time_kst": "TEXT",
-        "collected_at_kst": "TEXT",
-    }
-    try:
-        with engine.begin() as conn:
-            for col, typ in optional.items():
-                if col not in existing:
-                    conn.execute(text(f"ALTER TABLE summarized_news ADD COLUMN {col} {typ}"))
-    except OperationalError as exc:
-        logger.critical(
-            "DB 스키마 변경에 실패했습니다",
-            extra={
-                "event": "database_connection_failed",
-                "operation": "ensure_news_schema_alter",
-                "error": str(exc),
-                "error_type": "OperationalError",
-            },
-        )
-        raise
 
 
 def save_news(news_data: Dict[str, Any]) -> bool:

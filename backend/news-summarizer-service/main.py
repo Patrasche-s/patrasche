@@ -10,12 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import OperationalError
-
 from database import (
-    Base,
-    engine,
-    ensure_news_schema,
     get_existing_links,
     list_newsletter_rows_for_batch,
     save_news,
@@ -95,19 +90,6 @@ def _configure_scheduler_jobs() -> int:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    try:
-        Base.metadata.create_all(bind=engine)
-        ensure_news_schema()
-    except OperationalError as exc:
-        logger.critical(
-            "DB 연결에 실패했습니다",
-            extra={
-                "event": "database_connection_failed",
-                "error": str(exc),
-                "error_type": "OperationalError",
-            },
-        )
-        raise
     interval_minutes = _configure_scheduler_jobs()
     if not scheduler.running:
         scheduler.start()

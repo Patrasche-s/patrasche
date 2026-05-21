@@ -6,25 +6,10 @@ Ports: User 8000, Mail 8002, Summarizer 8004.
 
 from __future__ import annotations
 
-import os
-import sys
-import tempfile
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
-_SERVICE_DIR = Path(__file__).resolve().parents[1]
-
-os.environ.setdefault("GEMINI_API_KEY", "ci-placeholder-not-used-for-summarize-endpoint")
-
-_news_db_dir = tempfile.mkdtemp(prefix="summarizer-ci-")
-_news_db_path = Path(_news_db_dir) / "news_test.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_news_db_path.as_posix()}")
-
-sys.path.insert(0, str(_SERVICE_DIR))
-
-from main import app  # noqa: E402
+from main import app  # noqa: E402 — conftest.py applied migrations first
 
 
 @pytest.fixture()
