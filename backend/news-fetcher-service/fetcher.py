@@ -5,6 +5,7 @@ from typing import Dict, List
 
 import feedparser
 
+from rss_text import extract_author, extract_pub_date_utc, extract_rss_description
 
 RSS_FEEDS: Dict[str, str] = {
     "IT/테크": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
@@ -13,6 +14,15 @@ RSS_FEEDS: Dict[str, str] = {
     "스포츠": "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml",
     "연예": "https://rss.nytimes.com/services/xml/rss/nyt/Movies.xml",
     "정치": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+}
+
+CATEGORY_SLUGS: Dict[str, str] = {
+    "IT/테크": "it-tech",
+    "경제": "economy",
+    "국제": "world",
+    "스포츠": "sports",
+    "연예": "entertainment",
+    "정치": "politics",
 }
 
 DEFAULT_NEWS_LIMIT = 3
@@ -28,7 +38,7 @@ def get_rss_url(category: str) -> str:
 
 def fetch_latest_news(category: str, *, limit: int = DEFAULT_NEWS_LIMIT) -> List[Dict[str, str]]:
     """
-    지정한 카테고리의 최신 뉴스 최대 limit건(제목/링크)을 리스트로 가져온다.
+    지정한 카테고리의 최신 뉴스 최대 limit건(제목/링크/description 등)을 리스트로 가져온다.
     피드에 글이 없으면 빈 리스트를 반환한다.
     """
     if limit < 1:
@@ -51,6 +61,10 @@ def fetch_latest_news(category: str, *, limit: int = DEFAULT_NEWS_LIMIT) -> List
                 "category": category,
                 "title": title,
                 "link": link,
+                "rss_description": extract_rss_description(entry),
+                "feed_url": rss_url,
+                "pub_date_utc": extract_pub_date_utc(entry),
+                "author": extract_author(entry),
             }
         )
     return items

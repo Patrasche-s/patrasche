@@ -72,6 +72,7 @@ class SummarizedNews(Base):
     batch_date_kst: Mapped[str | None] = mapped_column(String(32), nullable=True)
     scheduled_run_time_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
     collected_at_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    s3_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
 
 def save_news(news_data: Dict[str, Any]) -> bool:
@@ -88,6 +89,7 @@ def save_news(news_data: Dict[str, Any]) -> bool:
         batch_date_kst=news_data.get("batch_date_kst"),
         scheduled_run_time_kst=news_data.get("scheduled_run_time_kst"),
         collected_at_kst=news_data.get("collected_at_kst"),
+        s3_key=news_data.get("s3_key"),
     )
     with SessionLocal() as session:
         session.add(row)

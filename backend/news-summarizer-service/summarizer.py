@@ -142,19 +142,19 @@ def _summarize_with_client(
     title = str(news.get("title", "")).strip()
     link = str(news.get("link", "")).strip()
     category = str(news.get("category", "")).strip()
+    rss_description = str(news.get("rss_description", "")).strip()
 
     if not title or not link:
         raise ValueError("news 입력에는 최소한 'title'과 'link'가 필요합니다.")
 
-    prompt = f"""
-You are a professional Korean news summarizer.
+    if rss_description:
+        prompt = f"""
+You are a professional Korean news summarizer for a daily newsletter.
 
-Input news (English headline and metadata only):
+Input (RSS title and description — use ONLY facts present below):
 - category: {category}
 - title: {title}
-
-Based on the English title (and category context), infer the likely story and write the summary in Korean.
-If the title alone is ambiguous, state reasonable inferences briefly in [주요 내용] without inventing specific facts.
+- rss_description: {rss_description}
 
 Write the summary in Korean ONLY, using EXACTLY this format:
 
@@ -168,8 +168,33 @@ Write the summary in Korean ONLY, using EXACTLY this format:
 [알아두면 좋은 점]: <배경 지식/시사점 1줄>
 
 Important rules:
-- Keep each line concise.
+- Base your writing ONLY on the title and rss_description above. Do NOT invent facts (no hallucination).
+- If the description is short, keep bullets concise without adding outside information.
+- Keep each line concise and friendly for a newsletter card.
 - Do NOT include any extra sections.
+- Do NOT include URLs or the original link anywhere inside the summary body.
+- Do NOT add markdown code blocks.
+""".strip()
+    else:
+        prompt = f"""
+You are a professional Korean news summarizer for a daily newsletter.
+
+Input (RSS title only — description was empty):
+- category: {category}
+- title: {title}
+
+The rss_description is empty. Write a brief Korean newsletter card using ONLY what the title states.
+Do NOT invent specific facts beyond what the title clearly implies.
+
+Write the summary in Korean ONLY, using EXACTLY this format:
+
+[오늘의 한 줄]: <제목 기반 핵심 1줄>
+
+[주요 내용]:
+- <제목에서 알 수 있는 내용 1줄>
+
+Important rules:
+- Keep it short because only the title is available.
 - Do NOT include URLs or the original link anywhere inside the summary body.
 - Do NOT add markdown code blocks.
 """.strip()

@@ -127,6 +127,7 @@ class NewsItem(BaseModel):
     title: str
     link: str
     category: str = ""
+    rss_description: Optional[str] = ""
 
 
 class SummarizeRequest(BaseModel):
@@ -155,6 +156,7 @@ class NewsCreateBody(BaseModel):
     batch_date_kst: Optional[str] = None
     scheduled_run_time_kst: Optional[str] = None
     collected_at_kst: Optional[str] = None
+    s3_key: Optional[str] = None
 
 
 class NewsCreateResponse(BaseModel):
@@ -190,7 +192,13 @@ def read_news(
 @app.post("/summarize", response_model=SummarizeResponse)
 def summarize(req: SummarizeRequest) -> SummarizeResponse:
     news_list: List[Dict[str, Any]] = [
-        {"title": it.title, "link": it.link, "category": it.category} for it in req.items
+        {
+            "title": it.title,
+            "link": it.link,
+            "category": it.category,
+            "rss_description": it.rss_description or "",
+        }
+        for it in req.items
     ]
     kwargs: Dict[str, Any] = {}
     if req.model is not None:

@@ -28,6 +28,7 @@ _CRON_EVENT_PREFIXES = (
     "category_no_items",
     "category_fetch_stats",
     "category_pipeline_failed",
+    "rss_snapshot_",
 )
 
 _SENSITIVE_KEY_RE = re.compile(

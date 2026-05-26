@@ -33,3 +33,14 @@ pytest tests/ -v
 ```
 
 Tests use a temporary SQLite DB and run `alembic upgrade head` automatically via `tests/conftest.py`.
+
+## S3 snapshot key (stored in DB)
+
+The fetcher may store an RSS snapshot object key in `summarized_news.s3_key` when uploading to S3.  
+`GET /news` does **not** expose `s3_key` (mail service unchanged).
+
+### Related AWS env (fetcher-side)
+
+See `backend/news-fetcher-service/README.md` for `AWS_REGION`, `S3_BUCKET`, `S3_PREFIX`.
+
+Infrastructure: Terraform apply path `terraform/database/S3`; fetcher IAM needs **PutObject**; lifecycle expire after 30 days recommended.

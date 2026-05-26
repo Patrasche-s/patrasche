@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
 from fetcher import DEFAULT_NEWS_LIMIT, fetch_latest_news_all_categories
+from s3_snapshot import RssSnapshotStats, upload_rss_snapshot
 from json_logging import (
     SCHEDULER_TIMEZONE,
     register_scheduler_logging,
@@ -333,6 +334,8 @@ def run_pipeline(
         "save_ignored": 0,
         "failed": 0,
     }
+    rss_snapshot_stats = RssSnapshotStats()
+    batch_meta = batch_metadata or {}
 
     with httpx.Client(timeout=timeout) as client:
         for category, items in fetched_by_category.items():
@@ -372,12 +375,21 @@ def run_pipeline(
                 continue
 
             try:
+                for it in fresh_items:
+                    s3_key = upload_rss_snapshot(
+                        it,
+                        batch_metadata=batch_meta,
+                        stats=rss_snapshot_stats,
+                    )
+                    it["s3_key"] = s3_key
+
                 payload: Dict[str, Any] = {
                     "items": [
                         {
                             "title": it["title"],
                             "link": it["link"],
                             "category": it.get("category", category),
+                            "rss_description": it.get("rss_description") or "",
                         }
                         for it in fresh_items
                     ]
@@ -408,11 +420,10 @@ def run_pipeline(
                             "title": news["title"],
                             "summary": summary_text,
                             "link": news["link"],
-                            "batch_date_kst": (batch_metadata or {}).get("batch_date_kst"),
-                            "scheduled_run_time_kst": (batch_metadata or {}).get(
-                                "scheduled_run_time_kst"
-                            ),
-                            "collected_at_kst": (batch_metadata or {}).get("collected_at_kst"),
+                            "s3_key": news.get("s3_key"),
+                            "batch_date_kst": batch_meta.get("batch_date_kst"),
+                            "scheduled_run_time_kst": batch_meta.get("scheduled_run_time_kst"),
+                            "collected_at_kst": batch_meta.get("collected_at_kst"),
                         },
                     )
                     stats["summarized"] += 1
@@ -456,6 +467,17 @@ def run_pipeline(
                     "category_pipeline_failed",
                     extra={"event": "category_pipeline_failed", "category": category, "error": str(exc)},
                 )
+
+    logger.info(
+        f"rss_snapshot_batch_done uploaded={rss_snapshot_stats.uploaded} "
+        f"failed={rss_snapshot_stats.failed} skipped={rss_snapshot_stats.skipped}",
+        extra={
+            "event": "rss_snapshot_batch_done",
+            "uploaded": rss_snapshot_stats.uploaded,
+            "failed": rss_snapshot_stats.failed,
+            "skipped": rss_snapshot_stats.skipped,
+        },
+    )
 
     return stats
 
