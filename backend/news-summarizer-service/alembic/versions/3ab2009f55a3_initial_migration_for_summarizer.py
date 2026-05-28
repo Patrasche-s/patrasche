@@ -26,7 +26,7 @@ def upgrade() -> None:
     sa.Column('category', sa.String(length=255), nullable=False),
     sa.Column('title', sa.Text(), nullable=False),
     sa.Column('summary', sa.Text(), nullable=False),
-    sa.Column('link', sa.String(length=2000), nullable=False),
+    sa.Column('link', sa.String(length=700), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('batch_date_kst', sa.String(length=32), nullable=True),
     sa.Column('scheduled_run_time_kst', sa.String(length=64), nullable=True),

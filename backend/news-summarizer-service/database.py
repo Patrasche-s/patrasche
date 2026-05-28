@@ -63,7 +63,8 @@ class SummarizedNews(Base):
     category: Mapped[str] = mapped_column(String(255), nullable=False)
     title: Mapped[str] = mapped_column(Text(), nullable=False)
     summary: Mapped[str] = mapped_column(Text(), nullable=False)
-    link: Mapped[str] = mapped_column(String(2000), nullable=False, unique=True)
+    # MySQL utf8mb4 + UNIQUE index length limit(3072 bytes) safe bound.
+    link: Mapped[str] = mapped_column(String(700), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         server_default=func.current_timestamp(),
