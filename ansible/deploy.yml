@@ -14,11 +14,10 @@
 
     - name: 애플리케이션 이미지 타겟 업데이트 (Deployment & CronJob)
       ansible.builtin.shell: |
-        # 백엔드 배포 활성화 시 주석 해제
-        # kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-backend:{{ image_tag }} -n {{ namespace }}
-        # kubectl set image deployment/summarizer-deployment summarizer-service={{ ecr_registry }}/patrasche-analyzer:{{ image_tag }} -n {{ namespace }}
-        # kubectl set image deployment/mail-deployment mail-service={{ ecr_registry }}/patrasche-notifier:{{ image_tag }} -n {{ namespace }}
-        # kubectl set image cronjob/fetcher-cronjob fetcher-service={{ ecr_registry }}/patrasche-crawler:{{ image_tag }} -n {{ namespace }}
+        kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-backend:{{ image_tag }} -n {{ namespace }}
+        kubectl set image deployment/summarizer-deployment summarizer-service={{ ecr_registry }}/patrasche-analyzer:{{ image_tag }} -n {{ namespace }}
+        kubectl set image deployment/mail-deployment mail-service={{ ecr_registry }}/patrasche-notifier:{{ image_tag }} -n {{ namespace }}
+        kubectl set image cronjob/fetcher-cronjob fetcher={{ ecr_registry }}/patrasche-crawler:{{ image_tag }} -n {{ namespace }}
 
         # 프론트엔드 이미지 배포
         kubectl set image deployment/webserving-deployment nginx={{ ecr_registry }}/patrasche-webserving:{{ image_tag }} -n {{ namespace }}
@@ -28,10 +27,9 @@
         kubectl get pods -n {{ namespace }}
         kubectl describe deployment webserving-deployment -n {{ namespace }}
 
-        # 백엔드 배포 활성화 시 주석 해제
-        # kubectl rollout status deployment/user-deployment -n {{ namespace }} --timeout=600s
-        # kubectl rollout status deployment/summarizer-deployment -n {{ namespace }} --timeout=600s
-        # kubectl rollout status deployment/mail-deployment -n {{ namespace }} --timeout=600s
+        kubectl rollout status deployment/user-deployment -n {{ namespace }} --timeout=600s
+        kubectl rollout status deployment/summarizer-deployment -n {{ namespace }} --timeout=600s
+        kubectl rollout status deployment/mail-deployment -n {{ namespace }} --timeout=600s
+        kubectl get cronjob/fetcher-cronjob -n {{ namespace }}
 
-        # 프론트엔드 rollout 확인
         kubectl rollout status deployment/webserving-deployment -n {{ namespace }} --timeout=600s
