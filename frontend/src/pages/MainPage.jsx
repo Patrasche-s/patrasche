@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { API_BASE_URL } from '../config/api'
 import styles from './MainPage.module.css'
 
 const TABS = [
@@ -11,17 +12,30 @@ const TABS = [
 export default function MainPage() {
   const [activeTab, setActiveTab] = useState('tech') 
   const [news, setNews] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
-  // TODO: API 서버 주소 확정되면 앞에 주소 추가
-  // 예) http://ALB주소/api/news/list?category=tech
   useEffect(()=> {
-    fetch(`cogez-alb-518575871.ap-northeast-2.elb.amazonaws.com/api/news/list?category=${activeTab}`)
-      .then(res => res.json())
-      .then(data => setNews(data))
+    setIsLoading(true)
+    setErrorMessage('')
+
+    fetch(`${API_BASE_URL}/api/news/list?category=${encodeURIComponent(activeTab)}`)
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`뉴스 조회 실패 (${res.status})`)
+        }
+        return res.json()
+      })
+      .then(data => {
+        const items = Array.isArray(data) ? data : data.items || []
+        setNews(items)
+      })
       .catch(err => {
         console.error(err)
-        setNews([]) // 에러나면 빈 배열
+        setErrorMessage('뉴스를 불러오지 못했어요')
+        setNews([])
       })
+      .finally(() => setIsLoading(false))
   }, [activeTab])
 
   return (
@@ -46,10 +60,14 @@ export default function MainPage() {
       </div>
 
       <div className={styles.list}>
-        {news.length === 0 ? (
+        {isLoading ? (
+          <div className={styles.empty}>
+            <p>뉴스를 불러오는 중이에요</p>
+          </div>
+        ) : news.length === 0 ? (
           <div className={styles.empty}>
             <span>📭</span>
-            <p>아직 뉴스가 없어요</p>
+            <p>{errorMessage || '아직 뉴스가 없어요'}</p>
           </div>
         ) : (
           news.map((item, i) => (
