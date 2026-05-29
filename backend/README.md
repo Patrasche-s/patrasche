@@ -1,0 +1,5 @@
+# backend
+
+MSA backend services: `user-service`, `mail-service`, `news-fetcher-service`, `news-summarizer-service`.
+
+Docker builds use root `Dockerfile.user`, `Dockerfile.mail`, `Dockerfile.fetcher`, and `Dockerfile.summarizer`.
