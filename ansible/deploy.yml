@@ -14,24 +14,24 @@
 
     - name: 애플리케이션 이미지 타겟 업데이트 (Deployment & CronJob)
       ansible.builtin.shell: |
-        # 백엔드 코드 올라오면 주석 해제
-        # kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-user:{{ image_tag }} -n {{ namespace }}
-        # kubectl set image deployment/summarizer-deployment summarizer-service={{ ecr_registry }}/patrasche-summarizer:{{ image_tag }} -n {{ namespace }}
-        # kubectl set image deployment/mail-deployment mail-service={{ ecr_registry }}/patrasche-mail:{{ image_tag }} -n {{ namespace }}
+        # 백엔드 배포 활성화 시 주석 해제
+        # kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-backend:{{ image_tag }} -n {{ namespace }}
+        # kubectl set image deployment/summarizer-deployment summarizer-service={{ ecr_registry }}/patrasche-analyzer:{{ image_tag }} -n {{ namespace }}
+        # kubectl set image deployment/mail-deployment mail-service={{ ecr_registry }}/patrasche-notifier:{{ image_tag }} -n {{ namespace }}
         # kubectl set image cronjob/fetcher-cronjob fetcher-service={{ ecr_registry }}/patrasche-crawler:{{ image_tag }} -n {{ namespace }}
 
-        # 프론트엔드만 우선 배포
+        # 프론트엔드 이미지 배포
         kubectl set image deployment/webserving-deployment nginx={{ ecr_registry }}/patrasche-webserving:{{ image_tag }} -n {{ namespace }}
 
     - name: 애플리케이션 활성상태 무중단 검증 (Rollout Status)
       ansible.builtin.shell: |
-        # 백엔드 코드 올라오면 주석 해제
-          # 파드 상태 확인
-          kubectl get pods -n patrasche
-          kubectl describe deployment webserving-deployment -n patrasche
+        kubectl get pods -n {{ namespace }}
+        kubectl describe deployment webserving-deployment -n {{ namespace }}
+
+        # 백엔드 배포 활성화 시 주석 해제
         # kubectl rollout status deployment/user-deployment -n {{ namespace }} --timeout=600s
         # kubectl rollout status deployment/summarizer-deployment -n {{ namespace }} --timeout=600s
         # kubectl rollout status deployment/mail-deployment -n {{ namespace }} --timeout=600s
 
-        # 프론트엔드만 확인
+        # 프론트엔드 rollout 확인
         kubectl rollout status deployment/webserving-deployment -n {{ namespace }} --timeout=600s

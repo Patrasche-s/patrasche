@@ -1,13 +1,16 @@
 pipeline {
   agent any
 
+  parameters {
+    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: '이미 ECR에 올라간 앱 이미지 태그')
+  }
+
   environment {
     ECR_REGISTRY      = credentials('ECR_REGISTRY')
     SLACK_WEBHOOK_URL = credentials('SLACK_WEBHOOK_URL')
     IAM_ROLE_ARN      = credentials('IAM_ROLE_ARN')
     AWS_REGION        = 'ap-northeast-2'
     EKS_CLUSTER_NAME  = 'patrasche-news'
-    IMAGE_TAG         = 'latest'
   }
 
   stages {
@@ -71,7 +74,8 @@ pipeline {
     //   }
     // }
 
-    // 도커 빌드 & ECR 푸시는 인프라 레포 Jenkinsfile에서 전담
+    // 도커 빌드 & ECR 푸시는 인프라 레포 Jenkinsfile에서 전담합니다.
+    // 이 파이프라인은 이미 ECR에 올라간 IMAGE_TAG를 EKS에 재배포합니다.
 
     // ──────────────────────────────────────────────────────────
     // Ansible 배포 전 Assume Role (kubectl 실행에 AWS 권한 필요)

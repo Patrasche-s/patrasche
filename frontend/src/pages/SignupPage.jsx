@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_BASE_URL } from '../config/api'
 import styles from './SignupPage.module.css'
 
 const CATEGORIES = [
@@ -13,6 +14,7 @@ const CATEGORIES = [
 export default function SignupPage({ onSignup }) {
   const [email, setEmail] = useState('') //입력한 이메일 저장
   const [selected, setSelected] = useState(['tech']) // 선택된 카테고리 목록 (기본값: tech)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const toggleCategory = (value) => {
     setSelected(prev =>
@@ -27,16 +29,21 @@ export default function SignupPage({ onSignup }) {
     if (selected.length === 0) return alert('카테고리를 하나 이상 선택해주세요')
     
     try {
-      const response = await fetch('cogez-alb-518575871.ap-northeast-2.elb.amazonaws.com', {
+      setIsSubmitting(true)
+      const response = await fetch(`${API_BASE_URL}/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, categories: selected })
+        body: JSON.stringify({ email, category: selected })
       })
       if (response.ok) {
         onSignup()
+        return
       }
+      alert('구독 신청 중 오류가 발생했습니다')
     } catch (error) {
       alert('구독 신청 중 오류가 발생했습니다')
+    } finally {
+      setIsSubmitting(false)
     }
   
   }
@@ -77,8 +84,8 @@ export default function SignupPage({ onSignup }) {
         ))}
       </div>
 
-      <button className={styles.btn} onClick={handleSubmit}>
-        구독 시작하기
+      <button className={styles.btn} onClick={handleSubmit} disabled={isSubmitting}>
+        {isSubmitting ? '신청 중...' : '구독 시작하기'}
       </button>
       <p className={styles.note}>
         비밀번호 없이 이메일만으로 구독할 수 있어요<br />
