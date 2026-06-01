@@ -3,6 +3,7 @@ pipeline {
 
   parameters {
     string(name: 'IMAGE_TAG', defaultValue: 'latest', description: '이미 ECR에 올라간 앱 이미지 태그')
+    booleanParam(name: 'DEPLOY_BACKEND', defaultValue: false, description: 'backend까지 함께 재배포할지 여부')
   }
 
   environment {
@@ -96,7 +97,7 @@ pipeline {
           ansible-playbook \
             -i ansible/inventory.ini \
             ansible/deploy.yml \
-            --extra-vars "image_tag=$IMAGE_TAG ecr_registry=$ECR_REGISTRY"
+            --extra-vars "image_tag=$IMAGE_TAG ecr_registry=$ECR_REGISTRY deploy_backend=$DEPLOY_BACKEND"
         '''
       }
     }
