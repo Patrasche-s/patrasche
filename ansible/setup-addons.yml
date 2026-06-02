@@ -39,7 +39,7 @@
           --namespace external-secrets \
           --create-namespace \
           --set installCRDs=true \
-          --wait --timeout 180s
+          --wait --timeout 300s
       changed_when: true
 
     - name: AWS Load Balancer Controller 설치
