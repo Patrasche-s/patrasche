@@ -34,46 +34,46 @@ pipeline {
       }
     }
 
-    // stage('린트 검사') {
-    //   steps {
-    //     sh '''
-    //       pip3 install flake8
-    //       /var/lib/jenkins/.local/bin/flake8 backend/mail-service --max-line-length=100
-    //       /var/lib/jenkins/.local/bin/flake8 backend/news-fetcher-service --max-line-length=100
-    //       /var/lib/jenkins/.local/bin/flake8 backend/news-summarizer-service --max-line-length=100
-    //       /var/lib/jenkins/.local/bin/flake8 backend/user-service --max-line-length=100
-    //     '''
-    //   }
-    // }
+    stage('린트 검사') {
+      steps {
+        sh '''
+          pip3 install flake8
+          /var/lib/jenkins/.local/bin/flake8 backend/mail-service --max-line-length=100
+          /var/lib/jenkins/.local/bin/flake8 backend/news-fetcher-service --max-line-length=100
+          /var/lib/jenkins/.local/bin/flake8 backend/news-summarizer-service --max-line-length=100
+          /var/lib/jenkins/.local/bin/flake8 backend/user-service --max-line-length=100
+        '''
+      }
+    }
 
-    // stage('테스트') {
-    //   environment {
-    //     DB_URL           = credentials('DB_URL')
-    //     SMTP_HOST        = credentials('SMTP_HOST')
-    //     SMTP_PORT        = credentials('SMTP_PORT')
-    //     SMTP_USER        = credentials('SMTP_USER')
-    //     SMTP_PASS        = credentials('SMTP_PASS')
-    //     ENABLE_SCHEDULER = 'false'
-    //   }
-    //   steps {
-    //     sh '''
-    //       PYTEST=/var/lib/jenkins/.local/bin/pytest
-    //       pip3 install anyio[trio]
+    stage('테스트') {
+      environment {
+        DB_URL           = credentials('DB_URL')
+        SMTP_HOST        = credentials('SMTP_HOST')
+        SMTP_PORT        = credentials('SMTP_PORT')
+        SMTP_USER        = credentials('SMTP_USER')
+        SMTP_PASS        = credentials('SMTP_PASS')
+        ENABLE_SCHEDULER = 'false'
+      }
+      steps {
+        sh '''
+          PYTEST=/var/lib/jenkins/.local/bin/pytest
+          pip3 install anyio[trio]
 
-    //       pip3 install -r backend/mail-service/requirements.txt
-    //       cd backend/mail-service && $PYTEST tests/ -v && cd ../..
+          pip3 install -r backend/mail-service/requirements.txt
+          cd backend/mail-service && $PYTEST tests/ -v && cd ../..
 
-    //       pip3 install -r backend/news-fetcher-service/requirements.txt
-    //       cd backend/news-fetcher-service && $PYTEST tests/ -v && cd ../..
+          pip3 install -r backend/news-fetcher-service/requirements.txt
+          cd backend/news-fetcher-service && $PYTEST tests/ -v && cd ../..
 
-    //       pip3 install -r backend/news-summarizer-service/requirements.txt
-    //       cd backend/news-summarizer-service && $PYTEST tests/ -v && cd ../..
+          pip3 install -r backend/news-summarizer-service/requirements.txt
+          cd backend/news-summarizer-service && $PYTEST tests/ -v && cd ../..
 
-    //       pip3 install -r backend/user-service/requirements.txt
-    //       cd backend/user-service && $PYTEST tests/ -v && cd ../..
-    //     '''
-    //   }
-    // }
+          pip3 install -r backend/user-service/requirements.txt
+          cd backend/user-service && $PYTEST tests/ -v && cd ../..
+        '''
+      }
+    }
 
     // 도커 빌드 & ECR 푸시는 인프라 레포 Jenkinsfile에서 전담합니다.
     // 이 파이프라인은 이미 ECR에 올라간 IMAGE_TAG를 EKS에 재배포합니다.
