@@ -62,6 +62,9 @@ pipeline {
           flake8 backend/user-service \
             --max-line-length=130 \
             --exclude=backend/user-service/alembic
+
+          deactivate
+          rm -rf .venv
         '''
       }
     }
@@ -110,6 +113,9 @@ pipeline {
           cd backend/user-service
           pytest tests/ -v
           cd ../..
+
+          deactivate
+          rm -rf .venv
         '''
       }
     }
