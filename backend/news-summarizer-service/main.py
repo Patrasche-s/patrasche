@@ -25,6 +25,7 @@ from json_logging import (
     setup_service_logging,
     uvicorn_log_config,
 )
+from summarizer import summarize_news_list
 
 _env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(_env_path, encoding="utf-8-sig")
@@ -36,7 +37,6 @@ register_scheduler_logging(scheduler, logger, service_name="news-summarizer")
 
 DEFAULT_SCHEDULER_HEARTBEAT_MINUTES = 60
 
-from summarizer import summarize_news_list
 
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key)
