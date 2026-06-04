@@ -61,6 +61,7 @@
           --namespace {{ namespace }} \
           --set provider=aws \
           --set txtOwnerId={{ eks_cluster }} \
+          --set txtPrefix=external-dns- \
           --set serviceAccount.create=true \
           --set serviceAccount.name=external-dns \
           --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="{{ external_dns_role_arn }}" \
