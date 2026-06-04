@@ -35,17 +35,32 @@ export default function SignupPage({ onSignup }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, category: selected })
       })
-      if (response.ok) {
+
+      if (response.status === 201) {
+        alert('인증 메일을 보냈습니다. 메일함에서 인증을 완료해주세요 📧')
         onSignup()
         return
       }
+
+      const data = await response.json()
+
+      if (response.status === 409) {
+        alert('이미 구독된 이메일입니다. 메일함에서 인증을 확인해주세요')
+        return
+      }
+
+      if (response.status === 422) {
+        alert(data.detail || '이메일/카테고리 값을 확인해주세요')
+        return
+      }
+
       alert('구독 신청 중 오류가 발생했습니다')
+
     } catch (error) {
       alert('구독 신청 중 오류가 발생했습니다')
     } finally {
       setIsSubmitting(false)
     }
-  
   }
 
   return (
