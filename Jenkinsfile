@@ -16,12 +16,13 @@ pipeline {
 
   stages {
 
+    //코드에 비밀번호/API키 등 민감정보 노출 여부 검사
     stage('Gitleaks 보안 스캔') {
       steps {
         sh 'gitleaks detect --source . --exit-code 1'
       }
     }
-
+    //코드/패키지의 HIGH, CRITICAL 보안 취약점 검사
     stage('Trivy 보안 스캔') {
       steps {
         sh '''
@@ -33,27 +34,38 @@ pipeline {
         '''
       }
     }
-
+    //백엔드 Python 코드 스타일/품질 검사
     stage('린트 검사') {
       steps {
         sh '''
-          pip3 install flake8
-          /var/lib/jenkins/.local/bin/flake8 backend/mail-service \
+          set -e
+
+          rm -rf .venv
+          python3 -m venv .venv
+          . .venv/bin/activate
+
+          pip install --upgrade pip
+          pip install flake8
+
+          flake8 backend/mail-service \
             --max-line-length=130 \
             --exclude=backend/mail-service/alembic
-          /var/lib/jenkins/.local/bin/flake8 backend/news-fetcher-service \
+
+          flake8 backend/news-fetcher-service \
             --max-line-length=130 \
             --exclude=backend/news-fetcher-service/alembic
-          /var/lib/jenkins/.local/bin/flake8 backend/news-summarizer-service \
+
+          flake8 backend/news-summarizer-service \
             --max-line-length=130 \
             --exclude=backend/news-summarizer-service/alembic
-          /var/lib/jenkins/.local/bin/flake8 backend/user-service \
+
+          flake8 backend/user-service \
             --max-line-length=130 \
             --exclude=backend/user-service/alembic
-           '''
+        '''
       }
     }
-
+    //백엔드 서비스별 단위 테스트 실행(mail, fetcher, summarizer, user 서비스)
     stage('테스트') {
       environment {
         DB_URL           = credentials('DB_URL')
@@ -65,20 +77,39 @@ pipeline {
       }
       steps {
         sh '''
-          PYTEST=/var/lib/jenkins/.local/bin/pytest
-          pip3 install anyio[trio]
+          set -e
 
-          pip3 install -r backend/mail-service/requirements.txt
-          cd backend/mail-service && $PYTEST tests/ -v && cd ../..
+          rm -rf .venv
+          python3 -m venv .venv
+          . .venv/bin/activate
 
-          pip3 install -r backend/news-fetcher-service/requirements.txt
-          cd backend/news-fetcher-service && $PYTEST tests/ -v && cd ../..
+          which python
+          which pip
+          python -c "import sys; print(sys.executable)"
 
-          pip3 install -r backend/news-summarizer-service/requirements.txt
-          cd backend/news-summarizer-service && $PYTEST tests/ -v && cd ../..
+          pip install --upgrade pip setuptools wheel
+          pip install pytest "anyio[trio]"
 
-          pip3 install -r backend/user-service/requirements.txt
-          cd backend/user-service && $PYTEST tests/ -v && cd ../..
+          pip install -r backend/mail-service/requirements.txt
+          pip install --upgrade pyOpenSSL cryptography
+          cd backend/mail-service
+          pytest tests/ -v
+          cd ../..
+
+          pip install -r backend/news-fetcher-service/requirements.txt
+          cd backend/news-fetcher-service
+          pytest tests/ -v
+          cd ../..
+
+          pip install -r backend/news-summarizer-service/requirements.txt
+          cd backend/news-summarizer-service
+          pytest tests/ -v
+          cd ../..
+
+          pip install -r backend/user-service/requirements.txt
+          cd backend/user-service
+          pytest tests/ -v
+          cd ../..
         '''
       }
     }
@@ -87,8 +118,11 @@ pipeline {
     // 이 파이프라인은 이미 ECR에 올라간 IMAGE_TAG를 EKS에 재배포합니다.
 
     // ──────────────────────────────────────────────────────────
-    // Ansible 배포 전 Assume Role (kubectl 실행에 AWS 권한 필요)
+    // Ansible 배포 전 Assume Role 
     // ──────────────────────────────────────────────────────────
+    
+    //Jenkins IAM User → deploy role 임시 자격증명 발급
+    //kubectl 실행에 필요한 AWS 권한 획득
     stage('AWS Assume Role') {
       steps {
         script {
@@ -96,7 +130,10 @@ pipeline {
         }
       }
     }
-
+    // EKS kubeconfig 업데이트
+    // ECR에 올라간 이미지를 EKS에 재배포
+    // DEPLOY_BACKEND=false → 프론트만 재배포
+    // DEPLOY_BACKEND=true  → 프론트 + 백엔드 재배포
     stage('Ansible 배포') {
       steps {
         sh '''
