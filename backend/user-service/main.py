@@ -46,6 +46,7 @@ logger = setup_service_logging("user-service")
 scheduler = AsyncIOScheduler(timezone=SCHEDULER_TIMEZONE)
 register_scheduler_logging(scheduler, logger, service_name="user-service")
 
+
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key)
     if raw is None or not str(raw).strip():
