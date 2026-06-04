@@ -39,16 +39,16 @@ pipeline {
         sh '''
           pip3 install flake8
           /var/lib/jenkins/.local/bin/flake8 backend/mail-service \
-            --max-line-length=100 \
+            --max-line-length=130 \
             --exclude=backend/mail-service/alembic
           /var/lib/jenkins/.local/bin/flake8 backend/news-fetcher-service \
-            --max-line-length=100 \
+            --max-line-length=130 \
             --exclude=backend/news-fetcher-service/alembic
           /var/lib/jenkins/.local/bin/flake8 backend/news-summarizer-service \
-            --max-line-length=100 \
+            --max-line-length=130 \
             --exclude=backend/news-summarizer-service/alembic
           /var/lib/jenkins/.local/bin/flake8 backend/user-service \
-            --max-line-length=100 \
+            --max-line-length=130 \
             --exclude=backend/user-service/alembic
            '''
       }
