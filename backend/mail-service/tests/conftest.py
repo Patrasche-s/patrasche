@@ -25,6 +25,8 @@ for _key, _value in {
     "MAIL_FROM": "ci@example.com",
     "USER_SERVICE_URL": "http://localhost:8000",
     "NEWS_DATA_SERVICE_URL": "http://localhost:8004",
+    "INTERNAL_API_TOKEN": "test-internal-token",
+    "UNSUBSCRIBE_BASE_URL": "http://localhost:8000/unsubscribe",
 }.items():
     os.environ.setdefault(_key, _value)
 

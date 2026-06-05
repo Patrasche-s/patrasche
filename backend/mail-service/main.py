@@ -4,6 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from collections.abc import Mapping
 from datetime import date, datetime
+from urllib.parse import quote
 from pathlib import Path
 from typing import Any
 
@@ -107,8 +108,25 @@ def _load_active_subscribers() -> list[dict[str, Any]]:
             categories = [str(c).strip() for c in raw_cats if str(c).strip()]
         else:
             categories = []
-        result.append({"email": email, "interest_categories": categories})
+        raw_unsub = item.get("unsubscribe_token")
+        unsubscribe_token = (
+            str(raw_unsub).strip() if raw_unsub is not None and str(raw_unsub).strip() else None
+        )
+        result.append(
+            {
+                "email": email,
+                "interest_categories": categories,
+                "unsubscribe_token": unsubscribe_token,
+            }
+        )
     return result
+
+
+def _build_unsubscribe_url(token: str | None) -> str | None:
+    if not token:
+        return None
+    base = settings.UNSUBSCRIBE_BASE_URL.rstrip("/")
+    return f"{base}?token={quote(token, safe='')}"
 
 
 def _row_display_time(row: Mapping[str, Any]) -> str:
@@ -331,6 +349,7 @@ async def _send_news_summary_email_payload(
     db: Session,
     batch_token: str,
     batch_date_kst: str | None,
+    unsubscribe_url: str | None = None,
 ) -> dict[str, Any]:
     subject = _newsletter_subject(
         date.fromisoformat(batch_date_kst) if batch_date_kst else datetime.now(SCHEDULER_TIMEZONE).date()
@@ -342,6 +361,7 @@ async def _send_news_summary_email_payload(
             "title": payload.title,
             "categories": payload.categories,
             "news_cards": [item.model_dump() for item in payload.news_cards],
+            "unsubscribe_url": unsubscribe_url,
         },
     )
     await _send_html_email(
@@ -431,6 +451,7 @@ async def _send_daily_newsletters_job() -> dict[str, int]:
                     db=db,
                     batch_token=_newsletter_batch_token(batch_date),
                     batch_date_kst=batch_date.isoformat(),
+                    unsubscribe_url=_build_unsubscribe_url(subscriber.get("unsubscribe_token")),
                 )
                 stats["sent"] += 1
             except Exception:

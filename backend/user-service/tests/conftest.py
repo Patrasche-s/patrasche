@@ -17,6 +17,7 @@ if str(_SERVICE_DIR) not in sys.path:
 _test_db_dir = tempfile.mkdtemp(prefix="user-ci-")
 _test_db_path = Path(_test_db_dir) / "user_test.sqlite"
 os.environ["DATABASE_URL"] = f"sqlite:///{_test_db_path.as_posix()}"
+os.environ.setdefault("INTERNAL_API_TOKEN", "test-internal-token")
 
 _alembic_cfg = Config(str(_SERVICE_DIR / "alembic.ini"))
 command.upgrade(_alembic_cfg, "head")

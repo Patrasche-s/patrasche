@@ -7,8 +7,9 @@ from datetime import date, datetime
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -26,6 +27,12 @@ from json_logging import (
 from models import Subscription
 from category_slugs import resolve_category_slug
 from schemas import InternalSubscriberOut, SubscribeCreate, SubscribeResponse
+from unsubscribe_pages import (
+    already_unsubscribed_html,
+    confirm_unsubscribe_html,
+    invalid_link_html,
+    unsubscribe_complete_html,
+)
 
 MAIL_SERVICE_URL = os.environ.get("MAIL_SERVICE_URL", "http://localhost:8002").rstrip("/")
 NEWS_API_BASE_URL = os.environ.get("NEWS_API_BASE_URL", "http://localhost:8004").rstrip("/")
@@ -218,13 +225,27 @@ async def api_news_list(
 
 def _require_internal_access(request: Request) -> None:
     if not INTERNAL_API_TOKEN:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="internal API is not configured",
+        )
     token = request.headers.get("x-internal-token", "").strip()
     if token != INTERNAL_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="internal API access denied",
         )
+
+
+def _find_by_unsubscribe_token(db: Session, token: str) -> Subscription | None:
+    raw = (token or "").strip()
+    if not raw:
+        return None
+    return (
+        db.query(Subscription)
+        .filter(Subscription.unsubscribe_token == raw)
+        .first()
+    )
 
 
 @app.get("/internal/subscribers", response_model=list[InternalSubscriberOut])
@@ -237,7 +258,10 @@ def internal_subscribers(
     try:
         rows = (
             db.query(Subscription)
-            .filter(Subscription.is_verified.is_(True))
+            .filter(
+                Subscription.is_verified.is_(True),
+                Subscription.is_active.is_(True),
+            )
             .order_by(Subscription.id.asc())
             .all()
         )
@@ -256,6 +280,7 @@ def internal_subscribers(
         InternalSubscriberOut(
             email=r.email,
             interest_categories=_deserialize_categories(r.category or ""),
+            unsubscribe_token=r.unsubscribe_token,
         )
         for r in rows
     ]
@@ -338,26 +363,6 @@ async def subscribe(
             },
         )
         raise
-    if existing:
-        logger.warning(
-            "이미 구독된 이메일입니다",
-            extra={"event": "subscribe_duplicate_email", "user_email": payload.email},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="이미 구독된 이메일입니다.",
-        )
-
-    verification_token = secrets.token_urlsafe(32)
-    logger.info(
-        "인증 토큰이 생성되었습니다",
-        extra={
-            "event": "verification_token_generated",
-            "user_email": payload.email,
-            "token_char_length": len(verification_token),
-        },
-    )
-
     category_csv = _serialize_categories(payload.category)
     if not category_csv:
         logger.warning(
@@ -368,11 +373,86 @@ async def subscribe(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="category는 최소 1개 이상의 값이 필요합니다.",
         )
+
+    if existing:
+        if existing.is_active:
+            logger.warning(
+                "이미 구독된 이메일입니다",
+                extra={"event": "subscribe_duplicate_email", "user_email": payload.email},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 구독된 이메일입니다.",
+            )
+        existing.is_active = True
+        existing.category = category_csv
+        existing.unsubscribe_token = secrets.token_urlsafe(32)
+        send_verification = False
+        if existing.is_verified:
+            logger.info(
+                "취소된 구독을 재활성했습니다",
+                extra={
+                    "event": "subscription_reactivated_verified",
+                    "user_email": payload.email,
+                },
+            )
+        else:
+            existing.verification_token = secrets.token_urlsafe(32)
+            send_verification = True
+            logger.info(
+                "미인증 취소 구독을 재활성했습니다",
+                extra={
+                    "event": "subscription_reactivated_unverified",
+                    "user_email": payload.email,
+                },
+            )
+        try:
+            db.commit()
+            db.refresh(existing)
+        except OperationalError as exc:
+            db.rollback()
+            logger.critical(
+                "DB 저장에 실패했습니다",
+                extra={
+                    "event": "database_connection_failed",
+                    "operation": "subscribe_reactivate_commit",
+                    "error": str(exc),
+                    "error_type": "OperationalError",
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="DB 연결에 실패했습니다.",
+            ) from exc
+        if send_verification:
+            background_tasks.add_task(
+                send_verification_email,
+                payload.email,
+                existing.verification_token,
+            )
+        return SubscribeResponse(
+            message="구독 신청 완료, 인증 메일 발송 대기",
+            email=existing.email,
+            category=_format_categories_for_popup(_deserialize_categories(existing.category)),
+        )
+
+    verification_token = secrets.token_urlsafe(32)
+    unsubscribe_token = secrets.token_urlsafe(32)
+    logger.info(
+        "인증·취소 토큰이 생성되었습니다",
+        extra={
+            "event": "subscription_tokens_generated",
+            "user_email": payload.email,
+        },
+    )
+
     row = Subscription(
         email=payload.email,
         category=category_csv,
         is_verified=False,
+        is_active=True,
         verification_token=verification_token,
+        unsubscribe_token=unsubscribe_token,
     )
     db.add(row)
     try:
@@ -415,10 +495,63 @@ async def subscribe(
     )
 
     return SubscribeResponse(
-        message="구독 완료!",
+        message="구독 신청 완료, 인증 메일 발송 대기",
         email=row.email,
         category=_format_categories_for_popup(_deserialize_categories(row.category)),
     )
+
+
+@app.get("/unsubscribe", response_class=HTMLResponse)
+def unsubscribe_confirm(token: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+    """Show confirm page only; never changes subscription state (scanner-safe GET)."""
+    subscriber = _find_by_unsubscribe_token(db, token)
+    if subscriber is None:
+        logger.warning(
+            "취소 링크가 유효하지 않습니다",
+            extra={"event": "unsubscribe_invalid_token"},
+        )
+        return HTMLResponse(content=invalid_link_html(), status_code=status.HTTP_400_BAD_REQUEST)
+    if not subscriber.is_active:
+        return HTMLResponse(content=already_unsubscribed_html(), status_code=status.HTTP_200_OK)
+    return HTMLResponse(content=confirm_unsubscribe_html(token), status_code=status.HTTP_200_OK)
+
+
+@app.post("/unsubscribe", response_class=HTMLResponse)
+def unsubscribe_execute(token: str = Form(...), db: Session = Depends(get_db)):
+    """Deactivate subscription; keeps unsubscribe_token for idempotent 'already cancelled'."""
+    subscriber = _find_by_unsubscribe_token(db, token)
+    if subscriber is None:
+        logger.warning(
+            "취소 요청 토큰이 유효하지 않습니다",
+            extra={"event": "unsubscribe_post_invalid_token"},
+        )
+        return HTMLResponse(content=invalid_link_html(), status_code=status.HTTP_400_BAD_REQUEST)
+    if not subscriber.is_active:
+        return HTMLResponse(content=already_unsubscribed_html(), status_code=status.HTTP_200_OK)
+
+    subscriber.is_active = False
+    try:
+        db.commit()
+    except OperationalError as exc:
+        db.rollback()
+        logger.critical(
+            "DB 저장에 실패했습니다",
+            extra={
+                "event": "database_connection_failed",
+                "operation": "unsubscribe_commit",
+                "error": str(exc),
+                "error_type": "OperationalError",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="DB 연결에 실패했습니다.",
+        ) from exc
+    logger.info(
+        "구독이 취소되었습니다",
+        extra={"event": "unsubscribe_success", "user_email": subscriber.email},
+    )
+    return HTMLResponse(content=unsubscribe_complete_html(), status_code=status.HTTP_200_OK)
 
 
 @app.get("/verify")

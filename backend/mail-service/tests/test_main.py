@@ -42,7 +42,11 @@ def test_load_active_subscribers_calls_user_service_http() -> None:
     """user-service DB를 직접 읽지 않고 GET /internal/subscribers만 호출하는지 검증."""
     mock_response = MagicMock()
     mock_response.json.return_value = [
-        {"email": "subscriber@example.com", "interest_categories": ["IT/테크", "경제"]},
+        {
+            "email": "subscriber@example.com",
+            "interest_categories": ["IT/테크", "경제"],
+            "unsubscribe_token": "unsub-test-token",
+        },
     ]
     mock_response.raise_for_status = MagicMock()
 
@@ -59,6 +63,12 @@ def test_load_active_subscribers_calls_user_service_http() -> None:
     assert "localhost:8000" in called_url
     assert called_url.rstrip("/").endswith("/internal/subscribers")
 
+    _call_kwargs = mock_session.get.call_args[1]
+    assert _call_kwargs.get("headers", {}).get("x-internal-token") == "test-internal-token"
     assert subscribers == [
-        {"email": "subscriber@example.com", "interest_categories": ["IT/테크", "경제"]},
+        {
+            "email": "subscriber@example.com",
+            "interest_categories": ["IT/테크", "경제"],
+            "unsubscribe_token": "unsub-test-token",
+        },
     ]

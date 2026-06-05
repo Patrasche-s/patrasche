@@ -27,7 +27,10 @@ def test_health_returns_200_json_ok(client: TestClient) -> None:
 
 def test_internal_subscribers_returns_json_list(client: TestClient) -> None:
     """내부 API는 JSON 배열만 반환 (mail-service 연동 계약)."""
-    response = client.get("/internal/subscribers")
+    response = client.get(
+        "/internal/subscribers",
+        headers={"x-internal-token": "test-internal-token"},
+    )
     assert response.status_code == 200
     body = response.json()
     assert isinstance(body, list)
