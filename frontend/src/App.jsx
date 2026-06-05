@@ -1,14 +1,22 @@
 import { useState } from 'react'
 import SignupPage from './pages/SignupPage'
 import MainPage from './pages/MainPage'
+import VerifyPage from './pages/VerifyPage'
 import './index.css'
 
+// URL에 email, token 파라미터 있으면 verify 페이지로
+const params = new URLSearchParams(window.location.search)
+const isVerifyPage = params.has('email') && params.has('token')
+
 export default function App() {
-  // 'signup' | 'pending' | 'main'
-  const [page, setPage] = useState('signup')
+  // 'signup' | 'pending' | 'main' | 'verify'
+  const [page, setPage] = useState(isVerifyPage ? 'verify' : 'signup')
 
   return (
     <div style={{ maxWidth: '480px', margin: '0 auto', minHeight: '100vh' }}>
+      {page === 'verify' && (
+        <VerifyPage onGoMain={() => setPage('main')} />
+      )}
       {page === 'signup' && (
         <SignupPage onSignup={() => setPage('pending')} />
       )}
