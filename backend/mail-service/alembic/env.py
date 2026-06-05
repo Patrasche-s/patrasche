@@ -24,7 +24,8 @@ target_metadata = Base.metadata
 
 
 def _configure_url() -> None:
-    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+    # ConfigParser treats % as interpolation syntax; escape for set_main_option only.
+    config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
