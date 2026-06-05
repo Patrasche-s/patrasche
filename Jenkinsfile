@@ -106,11 +106,11 @@ pipeline {
       }
     }
  // IMAGE_TAG 검증 (40자리 Git SHA만 허용)
-   stage('IMAGE_TAG 검증') {
+  stage('IMAGE_TAG 검증') {
     steps {
       script {
         if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
-          error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다.')
+          error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
         }
         echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
 
