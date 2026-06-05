@@ -11,7 +11,7 @@ RSS_FEEDS: Dict[str, str] = {
     "IT/테크": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
     "경제": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
     "국제": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-    "스포츠": "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml",
+    "스포츠": "https://www.theguardian.com/uk/sport/rss",
     "연예": "https://rss.nytimes.com/services/xml/rss/nyt/Movies.xml",
     "정치": "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
 }
