@@ -5,14 +5,21 @@
     namespace: patrasche
     aws_region: ap-northeast-2
   tasks:
+    - name: image_tag 검증
+      ansible.builtin.fail:
+        msg: "image_tag가 정의되지 않았거나 비어있거나 latest입니다. 40자리 Git SHA를 입력해주세요."
+      when: >
+        image_tag is not defined or
+        image_tag == '' or
+        image_tag == 'latest' or
+        image_tag | length != 40
+
     - name: kubeconfig 업데이트
       ansible.builtin.shell: |
         aws eks update-kubeconfig \
           --name {{ eks_cluster }} \
           --region {{ aws_region }}
 
-    # [수정] 백엔드 이미지 업데이트를 deploy_backend 조건으로 분리
-    # deploy_backend=false 시 백엔드 이미지 업데이트 스킵 → ErrImagePull 방지
     - name: 백엔드 이미지 타겟 업데이트 (Deployment & CronJob)
       ansible.builtin.shell: |
         kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-backend:{{ image_tag }} -n {{ namespace }}
@@ -25,8 +32,6 @@
       ansible.builtin.shell: |
         kubectl set image deployment/webserving-deployment nginx={{ ecr_registry }}/patrasche-webserving:{{ image_tag }} -n {{ namespace }}
 
-    # [수정] 백엔드 rollout 검증도 deploy_backend 조건으로 분리
-    # deploy_backend=false 시 백엔드 rollout 검증 스킵
     - name: 백엔드 활성상태 무중단 검증 (Rollout Status)
       ansible.builtin.shell: |
         kubectl get pods -n {{ namespace }}

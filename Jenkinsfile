@@ -2,7 +2,8 @@ pipeline {
   agent any
 
   parameters {
-    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: '이미 ECR에 올라간 앱 이미지 태그')
+    // latest 제거, 설명 업데이트
+    string(name: 'IMAGE_TAG', defaultValue: '', description: '앱 레포 Git SHA 40자리 (예: a1b2c3d4...)')
     booleanParam(name: 'DEPLOY_BACKEND', defaultValue: false, description: 'backend까지 함께 재배포할지 여부')
   }
 
@@ -16,13 +17,54 @@ pipeline {
 
   stages {
 
-    //코드에 비밀번호/API키 등 민감정보 노출 여부 검사
+    // IMAGE_TAG 검증 (40자리 Git SHA만 허용)
+    stage('IMAGE_TAG 검증') {
+      steps {
+        script {
+          if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
+            error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
+          }
+          echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
+
+          // 이미지 존재 여부 확인
+          withCredentials([
+            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
+            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'BASE_SECRET')
+          ]) {
+            sh """
+              AWS_ACCESS_KEY_ID=\$BASE_KEY \\
+              AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
+              aws ecr describe-images \\
+                --repository-name patrasche-webserving \\
+                --image-ids imageTag=${params.IMAGE_TAG} \\
+                --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
+                (echo "ERROR: webserving 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
+            """
+
+            if (params.DEPLOY_BACKEND) {
+              sh """
+                for repo in patrasche-backend patrasche-crawler patrasche-analyzer patrasche-notifier; do
+                  AWS_ACCESS_KEY_ID=\$BASE_KEY \\
+                  AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
+                  aws ecr describe-images \\
+                    --repository-name \$repo \\
+                    --image-ids imageTag=${params.IMAGE_TAG} \\
+                    --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
+                    (echo "ERROR: \$repo 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
+                done
+              """
+            }
+          }
+        }
+      }
+    }
+
     stage('Gitleaks 보안 스캔') {
       steps {
         sh 'gitleaks detect --source . --exit-code 1'
       }
     }
-    //코드/패키지의 HIGH, CRITICAL 보안 취약점 검사
+
     stage('Trivy 보안 스캔') {
       steps {
         sh '''
@@ -34,41 +76,34 @@ pipeline {
         '''
       }
     }
-    //백엔드 Python 코드 스타일/품질 검사
+
     stage('린트 검사') {
       steps {
         sh '''
           set -e
-
           rm -rf .venv
           python3 -m venv .venv
           . .venv/bin/activate
-
           pip install --upgrade pip
           pip install flake8
-
           flake8 backend/mail-service \
             --max-line-length=130 \
             --exclude=backend/mail-service/alembic
-
           flake8 backend/news-fetcher-service \
             --max-line-length=130 \
             --exclude=backend/news-fetcher-service/alembic
-
           flake8 backend/news-summarizer-service \
             --max-line-length=130 \
             --exclude=backend/news-summarizer-service/alembic
-
           flake8 backend/user-service \
             --max-line-length=130 \
             --exclude=backend/user-service/alembic
-
           deactivate
           rm -rf .venv
         '''
       }
     }
-    //백엔드 서비스별 단위 테스트 실행(mail, fetcher, summarizer, user 서비스)
+
     stage('테스트') {
       environment {
         DB_URL           = credentials('DB_URL')
@@ -81,54 +116,29 @@ pipeline {
       steps {
         sh '''
           set -e
-
           rm -rf .venv
           python3 -m venv .venv
           . .venv/bin/activate
-
           which python
           which pip
           python -c "import sys; print(sys.executable)"
-
           pip install --upgrade pip setuptools wheel
           pip install pytest "anyio[trio]"
-
           pip install -r backend/mail-service/requirements.txt
           pip install --upgrade pyOpenSSL cryptography
-          cd backend/mail-service
-          pytest tests/ -v
-          cd ../..
-
+          cd backend/mail-service && pytest tests/ -v && cd ../..
           pip install -r backend/news-fetcher-service/requirements.txt
-          cd backend/news-fetcher-service
-          pytest tests/ -v
-          cd ../..
-
+          cd backend/news-fetcher-service && pytest tests/ -v && cd ../..
           pip install -r backend/news-summarizer-service/requirements.txt
-          cd backend/news-summarizer-service
-          pytest tests/ -v
-          cd ../..
-
+          cd backend/news-summarizer-service && pytest tests/ -v && cd ../..
           pip install -r backend/user-service/requirements.txt
-          cd backend/user-service
-          pytest tests/ -v
-          cd ../..
-
+          cd backend/user-service && pytest tests/ -v && cd ../..
           deactivate
           rm -rf .venv
         '''
       }
     }
 
-    // 도커 빌드 & ECR 푸시는 인프라 레포 Jenkinsfile에서 전담합니다.
-    // 이 파이프라인은 이미 ECR에 올라간 IMAGE_TAG를 EKS에 재배포합니다.
-
-    // ──────────────────────────────────────────────────────────
-    // Ansible 배포 전 Assume Role 
-    // ──────────────────────────────────────────────────────────
-    
-    //Jenkins IAM User → deploy role 임시 자격증명 발급
-    //kubectl 실행에 필요한 AWS 권한 획득
     stage('AWS Assume Role') {
       steps {
         script {
@@ -136,10 +146,7 @@ pipeline {
         }
       }
     }
-    // EKS kubeconfig 업데이트
-    // ECR에 올라간 이미지를 EKS에 재배포
-    // DEPLOY_BACKEND=false → 프론트만 재배포
-    // DEPLOY_BACKEND=true  → 프론트 + 백엔드 재배포
+
     stage('Ansible 배포') {
       steps {
         sh '''
@@ -172,9 +179,6 @@ pipeline {
   }
 }
 
-// ──────────────────────────────────────────────────────────
-// 공통 함수: AWS Assume Role
-// ──────────────────────────────────────────────────────────
 def assumeAwsRole(String sessionName) {
   withCredentials([
     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
