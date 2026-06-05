@@ -11,7 +11,7 @@ const CATEGORIES = [
   { emoji: '🏛️', name: '정치',   value: 'politics' },
 ]
 
-export default function SignupPage({ onSignup }) {
+export default function SignupPage({ onSignup, onSignupComplete }) {
   const [email, setEmail] = useState('') //입력한 이메일 저장
   const [selected, setSelected] = useState(['tech']) // 선택된 카테고리 목록 (기본값: tech)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -37,8 +37,14 @@ export default function SignupPage({ onSignup }) {
       })
 
       if (response.status === 201) {
-        alert('인증 메일을 보냈습니다. 메일함에서 인증을 완료해주세요 📧')
-        onSignup()
+        const data = await response.json()
+        if (data.verification_pending) {
+          alert('인증 메일을 보냈습니다. 메일함에서 인증을 완료해주세요 📧')
+          onSignup()
+        } else {
+          alert('구독이 다시 활성화되었습니다. 뉴스를 받아보실 수 있어요.')
+          onSignupComplete?.()
+        }
         return
       }
 

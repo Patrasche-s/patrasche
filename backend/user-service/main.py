@@ -430,10 +430,17 @@ async def subscribe(
                 payload.email,
                 existing.verification_token,
             )
+            return SubscribeResponse(
+                message="구독 신청 완료, 인증 메일 발송 대기",
+                email=existing.email,
+                category=_format_categories_for_popup(_deserialize_categories(existing.category)),
+                verification_pending=True,
+            )
         return SubscribeResponse(
-            message="구독 신청 완료, 인증 메일 발송 대기",
+            message="구독이 다시 활성화되었습니다",
             email=existing.email,
             category=_format_categories_for_popup(_deserialize_categories(existing.category)),
+            verification_pending=False,
         )
 
     verification_token = secrets.token_urlsafe(32)
@@ -498,6 +505,7 @@ async def subscribe(
         message="구독 신청 완료, 인증 메일 발송 대기",
         email=row.email,
         category=_format_categories_for_popup(_deserialize_categories(row.category)),
+        verification_pending=True,
     )
 
 
