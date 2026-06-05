@@ -7,33 +7,42 @@ const TABS = [
   { emoji: '📈', name: '경제',   value: 'economy' },
   { emoji: '🌍', name: '국제',   value: 'world' },
   { emoji: '⚽', name: '스포츠', value: 'sports' },
+  { emoji: '🎬', name: '연예',   value: 'entertainment' },
+  { emoji: '🏛️', name: '정치',   value: 'politics' },
 ]
 
+// desc에서 URL 추출
+function extractUrl(desc) {
+  const match = desc?.match(/https?:\/\/[^\s]+/)
+  return match ? match[0] : null
+}
+
 export default function MainPage() {
-  const [activeTab, setActiveTab] = useState('tech') 
+  const [activeTab, setActiveTab] = useState('tech')
   const [news, setNews] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [hasNews, setHasNews] = useState({})
 
-  useEffect(()=> {
+  useEffect(() => {
     setIsLoading(true)
     setErrorMessage('')
 
     fetch(`${API_BASE_URL}/api/news/list?category=${encodeURIComponent(activeTab)}`)
       .then(res => {
-        if (!res.ok) {
-          throw new Error(`뉴스 조회 실패 (${res.status})`)
-        }
+        if (!res.ok) throw new Error(`뉴스 조회 실패 (${res.status})`)
         return res.json()
       })
       .then(data => {
         const items = Array.isArray(data) ? data : data.items || []
         setNews(items)
+        setHasNews(prev => ({ ...prev, [activeTab]: items.length > 0 }))
       })
       .catch(err => {
         console.error(err)
         setErrorMessage('뉴스를 불러오지 못했어요')
         setNews([])
+        setHasNews(prev => ({ ...prev, [activeTab]: false }))
       })
       .finally(() => setIsLoading(false))
   }, [activeTab])
@@ -52,6 +61,7 @@ export default function MainPage() {
           <button
             key={tab.value}
             className={`${styles.tab} ${activeTab === tab.value ? styles.active : ''}`}
+            style={{ opacity: hasNews[tab.value] === false ? 0.4 : 1 }}
             onClick={() => setActiveTab(tab.value)}
           >
             {tab.emoji} {tab.name}
@@ -70,17 +80,25 @@ export default function MainPage() {
             <p>{errorMessage || '아직 뉴스가 없어요'}</p>
           </div>
         ) : (
-          news.map((item, i) => (
-            <div key={i} className={styles.card}>
-              <div className={styles.meta}>
-                <span className={styles.source}>{item.source}</span>
-                <span className={styles.dot} />
-                <span className={styles.time}>{item.time}</span>
+          news.map((item, i) => {
+            const url = extractUrl(item.desc)
+            return (
+              <div
+                key={i}
+                className={styles.card}
+                onClick={() => url && window.open(url, '_blank')}
+                style={{ cursor: url ? 'pointer' : 'default' }}
+              >
+                <div className={styles.meta}>
+                  <span className={styles.source}>{item.source}</span>
+                  <span className={styles.dot} />
+                  <span className={styles.time}>{item.time}</span>
+                </div>
+                <div className={styles.newsTitle}>{item.title}</div>
+                <div className={styles.desc}>{item.desc}</div>
               </div>
-              <div className={styles.newsTitle}>{item.title}</div>
-              <div className={styles.desc}>{item.desc}</div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>
