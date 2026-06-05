@@ -45,6 +45,38 @@ def _create_subscription(
         return row
 
 
+def test_subscribe_active_verified_returns_409_without_verification_pending(
+    client: TestClient,
+) -> None:
+    email = f"dup-verified-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=email, is_verified=True, is_active=True)
+
+    response = client.post(
+        "/subscribe",
+        json={"email": email, "category": ["tech"]},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["verification_pending"] is False
+    assert "이미 구독" in detail["message"]
+
+
+def test_subscribe_active_unverified_returns_409_with_verification_pending(
+    client: TestClient,
+) -> None:
+    email = f"dup-unverified-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=email, is_verified=False, is_active=True)
+
+    response = client.post(
+        "/subscribe",
+        json={"email": email, "category": ["tech"]},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["verification_pending"] is True
+    assert "이미 구독" in detail["message"]
+
+
 @patch("main.send_verification_email", new_callable=AsyncMock)
 def test_subscribe_sets_unsubscribe_token(_mock_mail: AsyncMock, client: TestClient) -> None:
     email = f"new-{uuid.uuid4().hex}@example.com"

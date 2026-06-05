@@ -51,7 +51,18 @@ export default function SignupPage({ onSignup, onSignupComplete }) {
       const data = await response.json()
 
       if (response.status === 409) {
-        alert('이미 구독된 이메일입니다. 메일함에서 인증을 확인해주세요')
+        const detail = data.detail
+        const verificationPending =
+          typeof detail === 'object' && detail !== null
+            ? detail.verification_pending
+            : true
+        if (verificationPending) {
+          alert('이미 구독된 이메일입니다. 메일함에서 인증을 확인해주세요')
+          onSignup()
+        } else {
+          alert('이미 구독 중인 이메일입니다.')
+          onSignupComplete?.()
+        }
         return
       }
 

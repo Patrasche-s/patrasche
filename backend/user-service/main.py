@@ -382,7 +382,10 @@ async def subscribe(
             )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="이미 구독된 이메일입니다.",
+                detail={
+                    "message": "이미 구독된 이메일입니다.",
+                    "verification_pending": not existing.is_verified,
+                },
             )
         existing.is_active = True
         existing.category = category_csv
