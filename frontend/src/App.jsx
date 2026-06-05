@@ -18,7 +18,10 @@ export default function App() {
         <VerifyPage onGoMain={() => setPage('main')} />
       )}
       {page === 'signup' && (
-        <SignupPage onSignup={() => setPage('pending')} />
+        <SignupPage
+          onSignup={() => setPage('pending')}
+          onSignupComplete={() => setPage('main')}
+        />
       )}
       {page === 'pending' && (
         <div style={{ textAlign: 'center', padding: '60px 24px' }}>

@@ -19,6 +19,7 @@ class SubscribeResponse(BaseModel):
     message: str
     email: str
     category: str
+    verification_pending: bool = True
 
 
 class InternalSubscriberOut(BaseModel):

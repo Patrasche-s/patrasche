@@ -45,6 +45,38 @@ def _create_subscription(
         return row
 
 
+def test_subscribe_active_verified_returns_409_without_verification_pending(
+    client: TestClient,
+) -> None:
+    email = f"dup-verified-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=email, is_verified=True, is_active=True)
+
+    response = client.post(
+        "/subscribe",
+        json={"email": email, "category": ["tech"]},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["verification_pending"] is False
+    assert "이미 구독" in detail["message"]
+
+
+def test_subscribe_active_unverified_returns_409_with_verification_pending(
+    client: TestClient,
+) -> None:
+    email = f"dup-unverified-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=email, is_verified=False, is_active=True)
+
+    response = client.post(
+        "/subscribe",
+        json={"email": email, "category": ["tech"]},
+    )
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["verification_pending"] is True
+    assert "이미 구독" in detail["message"]
+
+
 @patch("main.send_verification_email", new_callable=AsyncMock)
 def test_subscribe_sets_unsubscribe_token(_mock_mail: AsyncMock, client: TestClient) -> None:
     email = f"new-{uuid.uuid4().hex}@example.com"
@@ -119,6 +151,28 @@ def test_internal_subscribers_requires_token(client: TestClient) -> None:
     assert response.status_code == 403
 
 
+def test_internal_subscribers_503_when_token_not_configured(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("main.INTERNAL_API_TOKEN", "")
+    response = client.get("/internal/subscribers", headers=_INTERNAL_HEADERS)
+    assert response.status_code == 503
+
+
+def test_internal_subscribers_excludes_active_unverified(client: TestClient) -> None:
+    verified_email = f"verified-{uuid.uuid4().hex}@example.com"
+    unverified_email = f"unverified-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=verified_email, is_verified=True, is_active=True)
+    _create_subscription(email=unverified_email, is_verified=False, is_active=True)
+
+    response = client.get("/internal/subscribers", headers=_INTERNAL_HEADERS)
+    assert response.status_code == 200
+    emails = {item["email"] for item in response.json()}
+    assert verified_email in emails
+    assert unverified_email not in emails
+
+
 @patch("main.send_verification_email", new_callable=AsyncMock)
 def test_resubscribe_reactivates_and_regenerates_unsubscribe_token(
     _mock_mail: AsyncMock,
@@ -133,6 +187,10 @@ def test_resubscribe_reactivates_and_regenerates_unsubscribe_token(
         json={"email": email, "category": ["economy"]},
     )
     assert response.status_code == 201
+    body = response.json()
+    assert body["verification_pending"] is False
+    assert "다시 활성화" in body["message"]
+    _mock_mail.assert_not_called()
 
     with SessionLocal() as db:
         refreshed = db.query(Subscription).filter(Subscription.email == email).first()
@@ -141,3 +199,24 @@ def test_resubscribe_reactivates_and_regenerates_unsubscribe_token(
         assert refreshed.category == "경제"
         assert refreshed.unsubscribe_token != old_unsub
         assert refreshed.is_verified is True
+
+    stale_get = client.get("/unsubscribe", params={"token": old_unsub})
+    assert stale_get.status_code == 400
+
+
+@patch("main.send_verification_email", new_callable=AsyncMock)
+def test_resubscribe_unverified_sends_verification_mail(
+    mock_mail: AsyncMock,
+    client: TestClient,
+) -> None:
+    email = f"unverified-resub-{uuid.uuid4().hex}@example.com"
+    _create_subscription(email=email, is_verified=False, is_active=False)
+
+    response = client.post(
+        "/subscribe",
+        json={"email": email, "category": ["tech"]},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["verification_pending"] is True
+    mock_mail.assert_called_once()

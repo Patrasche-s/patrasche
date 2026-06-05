@@ -1,5 +1,6 @@
 # CI/CD: 4개 MSA 서비스 공통 의존성 (서비스별 requirements.txt와 동기화)
 fastapi>=0.115.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.32.0
 sqlalchemy>=2.0.36
 PyMySQL>=1.1.1
