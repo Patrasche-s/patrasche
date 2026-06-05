@@ -17,48 +17,7 @@ pipeline {
 
   stages {
 
-    // IMAGE_TAG 검증 (40자리 Git SHA만 허용)
-    stage('IMAGE_TAG 검증') {
-      steps {
-        script {
-          if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
-            error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
-          }
-          echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
-
-          // 이미지 존재 여부 확인
-          withCredentials([
-            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
-            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'BASE_SECRET')
-          ]) {
-            sh """
-              AWS_ACCESS_KEY_ID=\$BASE_KEY \\
-              AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
-              aws ecr describe-images \\
-                --repository-name patrasche-webserving \\
-                --image-ids imageTag=${params.IMAGE_TAG} \\
-                --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
-                (echo "ERROR: webserving 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
-            """
-
-            if (params.DEPLOY_BACKEND) {
-              sh """
-                for repo in patrasche-backend patrasche-crawler patrasche-analyzer patrasche-notifier; do
-                  AWS_ACCESS_KEY_ID=\$BASE_KEY \\
-                  AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
-                  aws ecr describe-images \\
-                    --repository-name \$repo \\
-                    --image-ids imageTag=${params.IMAGE_TAG} \\
-                    --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
-                    (echo "ERROR: \$repo 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
-                done
-              """
-            }
-          }
-        }
-      }
-    }
-
+   
     stage('Gitleaks 보안 스캔') {
       steps {
         sh 'gitleaks detect --source . --exit-code 1'
@@ -143,6 +102,47 @@ pipeline {
       steps {
         script {
           assumeAwsRole('jenkins-app-deploy-session')
+        }
+      }
+    }
+ // IMAGE_TAG 검증 (40자리 Git SHA만 허용)
+    stage('IMAGE_TAG 검증') {
+      steps {
+        script {
+          if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
+            error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
+          }
+          echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
+
+          // 이미지 존재 여부 확인
+          withCredentials([
+            string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
+            string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'BASE_SECRET')
+          ]) {
+            sh """
+              AWS_ACCESS_KEY_ID=\$BASE_KEY \\
+              AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
+              aws ecr describe-images \\
+                --repository-name patrasche-webserving \\
+                --image-ids imageTag=${params.IMAGE_TAG} \\
+                --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
+                (echo "ERROR: webserving 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
+            """
+
+            if (params.DEPLOY_BACKEND) {
+              sh """
+                for repo in patrasche-backend patrasche-crawler patrasche-analyzer patrasche-notifier; do
+                  AWS_ACCESS_KEY_ID=\$BASE_KEY \\
+                  AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \\
+                  aws ecr describe-images \\
+                    --repository-name \$repo \\
+                    --image-ids imageTag=${params.IMAGE_TAG} \\
+                    --region ${env.AWS_REGION} > /dev/null 2>&1 || \\
+                    (echo "ERROR: \$repo 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
+                done
+              """
+            }
+          }
         }
       }
     }
