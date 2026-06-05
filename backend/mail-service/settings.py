@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # 메일 본문에 넣을 인증 링크(선택)
     VERIFY_BASE_URL: str = "http://localhost:8000/verify"
+    UNSUBSCRIBE_BASE_URL: str = "http://localhost:8000/unsubscribe"
     USER_SERVICE_URL: str = "http://localhost:8000"
     NEWS_DATA_SERVICE_URL: str = "http://localhost:8004"
     INTERNAL_API_TOKEN: str = ""

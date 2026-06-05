@@ -26,3 +26,4 @@ class InternalSubscriberOut(BaseModel):
 
     email: str
     interest_categories: List[str] = Field(default_factory=list)
+    unsubscribe_token: str | None = None

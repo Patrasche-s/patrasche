@@ -38,6 +38,12 @@
             </p>
         </div>
         {% endfor %}
+
+        {% if unsubscribe_url %}
+        <p style="margin:32px 0 0 0;text-align:center;font-size:14px;color:#8e949e;">
+            <a href="{{ unsubscribe_url }}" style="color:#8e949e;">구독 취소</a>
+        </p>
+        {% endif %}
     </div>
 </body>
 </html>
