@@ -31,7 +31,20 @@
 }
 
 .tabs::-webkit-scrollbar {
-  display: none;
+  height: 4px;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab {
+  flex-shrink: 0;  
 }
 
 .tab {
