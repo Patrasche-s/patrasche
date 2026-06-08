@@ -10,20 +10,23 @@ pipeline {
   environment {
     ECR_REGISTRY      = credentials('ECR_REGISTRY')
     SLACK_WEBHOOK_URL = credentials('SLACK_WEBHOOK_URL')
-    IAM_ROLE_ARN      = credentials('IAM_ROLE_ARN')
+    APP_ROLE_ARN      = credentials('APP_ROLE_ARN')
     AWS_REGION        = 'ap-northeast-2'
     EKS_CLUSTER_NAME  = 'patrasche-news'
   }
 
   stages {
-
-   
+    // ── STAGE 1 ──────────────────────────────────────────────
+    // 코드에 비밀번호/API키 등 민감정보 노출 여부 검사
+    // ─────────────────────────────────────────────────────────
     stage('Gitleaks 보안 스캔') {
       steps {
         sh 'gitleaks detect --source . --exit-code 1'
       }
     }
-
+    // ── STAGE 2 ──────────────────────────────────────────────
+    // 코드/패키지의 HIGH, CRITICAL 보안 취약점 검사
+    // ─────────────────────────────────────────────────────────
     stage('Trivy 보안 스캔') {
       steps {
         sh '''
@@ -35,7 +38,9 @@ pipeline {
         '''
       }
     }
-
+    // ── STAGE 3 ──────────────────────────────────────────────
+    // 백엔드 Python 코드 스타일/품질 검사
+    // ─────────────────────────────────────────────────────────
     stage('린트 검사') {
       steps {
         sh '''
@@ -62,7 +67,10 @@ pipeline {
         '''
       }
     }
-
+    // ── STAGE 4 ──────────────────────────────────────────────
+    // 백엔드 서비스별 단위 테스트 실행
+    // mail, fetcher, summarizer, user 서비스
+    // ─────────────────────────────────────────────────────────
     stage('테스트') {
       environment {
         DB_URL           = credentials('DB_URL')
@@ -97,16 +105,23 @@ pipeline {
         '''
       }
     }
-
+    // ── STAGE 5 ──────────────────────────────────────────────
+    // Jenkins IAM User → jenkins-app-role로 임시 자격증명 발급
+    // ECR Push, patrasche 네임스페이스 배포 권한 획득
+    // ─────────────────────────────────────────────────────────
     stage('AWS Assume Role') {
       steps {
         script {
-          assumeAwsRole('jenkins-app-deploy-session')
+          assumeAwsRole('jenkins-app-deploy-session', env.APP_ROLE_ARN)
         }
       }
     }
- // IMAGE_TAG 검증 (40자리 Git SHA만 허용)
-  stage('IMAGE_TAG 검증') {
+    // ── STAGE 6 ──────────────────────────────────────────────
+    // IMAGE_TAG 40자리 Git SHA 형식 검증
+    // ECR에 해당 태그 이미지 존재 여부 확인
+    // latest 및 빈 값 거부
+    // ─────────────────────────────────────────────────────────
+    stage('IMAGE_TAG 검증') {
     steps {
       script {
         if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
@@ -137,6 +152,11 @@ pipeline {
       }
     }
   }
+    // ── STAGE 7 ──────────────────────────────────────────────
+    // ECR에 이미 올라간 이미지를 EKS에 재배포
+    // DEPLOY_BACKEND=false → 프론트만 재배포
+    // DEPLOY_BACKEND=true  → 프론트 + 백엔드 재배포
+    // ─────────────────────────────────────────────────────────
     stage('Ansible 배포') {
       steps {
         sh '''
@@ -169,7 +189,7 @@ pipeline {
   }
 }
 
-def assumeAwsRole(String sessionName) {
+def assumeAwsRole(String sessionName, String roleArn) {
   withCredentials([
     string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
     string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'BASE_SECRET')
@@ -179,7 +199,7 @@ def assumeAwsRole(String sessionName) {
       AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \
       AWS_SESSION_TOKEN="" \
       aws sts assume-role \
-        --role-arn "${env.IAM_ROLE_ARN}" \
+        --role-arn "${roleArn}" \
         --role-session-name "${sessionName}" \
         --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
         --output text
@@ -203,8 +223,8 @@ def assumeAwsRole(String sessionName) {
       IDENTITY_ARN=$(aws sts get-caller-identity --query Arn --output text)
       echo "Current AWS Identity: $IDENTITY_ARN"
       case "$IDENTITY_ARN" in
-        *":assumed-role/jenkins-onprem-deploy-role/"*)
-          echo "OK: assumed deploy role"
+        *":assumed-role/jenkins-app-role/"*)
+          echo "OK: assumed app role"
           ;;
         *)
           echo "ERROR: not using deploy role. Current identity: $IDENTITY_ARN"
