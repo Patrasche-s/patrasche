@@ -128,31 +128,61 @@ pipeline {
           error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
         }
         echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
-
-        // [수정] withCredentials 제거 → Assume Role 환경변수 그대로 사용
-        sh """
-          aws ecr describe-images \
-            --repository-name patrasche-webserving \
-            --image-ids imageTag=${params.IMAGE_TAG} \
-            --region ${env.AWS_REGION} > /dev/null 2>&1 || \
-            (echo "ERROR: webserving 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
-        """
-
-        if (params.DEPLOY_BACKEND) {
-          sh """
-            for repo in patrasche-backend patrasche-crawler patrasche-analyzer patrasche-notifier; do
-              aws ecr describe-images \
-                --repository-name \$repo \
-                --image-ids imageTag=${params.IMAGE_TAG} \
-                --region ${env.AWS_REGION} > /dev/null 2>&1 || \
-                (echo "ERROR: \$repo 이미지가 ECR에 없습니다. TAG: ${params.IMAGE_TAG}" && exit 1)
-            done
-          """
-        }
       }
     }
   }
     // ── STAGE 7 ──────────────────────────────────────────────
+    // 앱 레포 Git SHA로 Docker 이미지 빌드 후 ECR Push
+    // 동일 SHA 이미지가 이미 있으면 빌드 스킵
+    // ─────────────────────────────────────────────────────────
+    stage('Docker Build & Push') {
+      steps {
+        sh '''
+          set -eu
+          echo "=== Docker Build & Push 시작 ==="
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          if aws ecr describe-images \
+            --repository-name patrasche-webserving \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" > /dev/null 2>&1; then
+            echo "이미지 이미 존재: patrasche-webserving:$IMAGE_TAG → 빌드 스킵"
+          else
+            docker build -t "$ECR_REGISTRY/patrasche-webserving:$IMAGE_TAG" \
+              --build-arg "VITE_API_BASE_URL=https://api.patrasche.cloud" \
+              -f frontend/Dockerfile \
+              frontend
+            docker push "$ECR_REGISTRY/patrasche-webserving:$IMAGE_TAG"
+          fi
+
+          for repo_info in \
+            "patrasche-backend:Dockerfile.user" \
+            "patrasche-crawler:Dockerfile.fetcher" \
+            "patrasche-analyzer:Dockerfile.summarizer" \
+            "patrasche-notifier:Dockerfile.mail"; do
+            REPO=$(echo $repo_info | cut -d: -f1)
+            DOCKERFILE=$(echo $repo_info | cut -d: -f2)
+            if aws ecr describe-images \
+              --repository-name "$REPO" \
+              --image-ids imageTag="$IMAGE_TAG" \
+              --region "$AWS_REGION" > /dev/null 2>&1; then
+              echo "이미지 이미 존재: $REPO:$IMAGE_TAG → 빌드 스킵"
+            else
+              docker build -t "$ECR_REGISTRY/$REPO:$IMAGE_TAG" \
+                -f "backend/$DOCKERFILE" \
+                backend
+              docker push "$ECR_REGISTRY/$REPO:$IMAGE_TAG"
+            fi
+          done
+        '''
+      }
+    }
+    
+    // ── STAGE 8 ──────────────────────────────────────────────
     // ECR에 이미 올라간 이미지를 EKS에 재배포
     // DEPLOY_BACKEND=false → 프론트만 재배포
     // DEPLOY_BACKEND=true  → 프론트 + 백엔드 재배포
