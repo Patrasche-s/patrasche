@@ -23,6 +23,7 @@ uvicorn main:app --host 0.0.0.0 --port 8002
 
 - If you see `no such table` or DB errors on startup, run `alembic upgrade head` in this directory first.
 - Default DB file when `DATABASE_URL` is unset: `mail_db.sqlite`
+- For production email delivery issues, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md).
 
 ## Tests
 

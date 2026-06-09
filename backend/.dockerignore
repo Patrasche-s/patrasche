@@ -10,3 +10,7 @@
 **/*.db
 **/.env
 **/tests/
+**/.DS_Store
+**/Thumbs.db
+**/.vscode/
+**/.idea/
