@@ -2,9 +2,9 @@ pipeline {
   agent any
 
   parameters {
-    // latest 제거, 설명 업데이트
-    string(name: 'IMAGE_TAG', defaultValue: '', description: '앱 레포 Git SHA 40자리 (예: a1b2c3d4...)')
-    booleanParam(name: 'DEPLOY_BACKEND', defaultValue: false, description: 'backend까지 함께 재배포할지 여부')
+    // 비우면 자동 트리거 시 현재 커밋 SHA 사용, 값 넣으면 해당 SHA 배포(롤백용)
+    string(name: 'IMAGE_TAG', defaultValue: '', description: '롤백/수동 배포용 Git SHA 40자리. 비우면 현재 커밋 자동 사용')
+    booleanParam(name: 'DEPLOY_BACKEND', defaultValue: true, description: 'backend 포함 전체 배포 (기본 true)')
   }
 
   environment {
@@ -16,6 +16,26 @@ pipeline {
   }
 
   stages {
+    // ── STAGE 0 ──────────────────────────────────────────────
+    // 배포 대상 IMAGE_TAG 결정
+    // 파라미터 값 있으면 사용(수동/롤백), 없으면 현재 커밋 SHA(자동 트리거)
+    // ─────────────────────────────────────────────────────────
+    stage('IMAGE_TAG 결정') {
+      steps {
+        script {
+          if (params.IMAGE_TAG?.trim()) {
+            env.IMAGE_TAG = params.IMAGE_TAG.trim()
+            echo "수동 지정 IMAGE_TAG: ${env.IMAGE_TAG}"
+          } else {
+            env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+            echo "자동 추출 IMAGE_TAG (현재 커밋): ${env.IMAGE_TAG}"
+          }
+          // 수동/자동 공통 — DEPLOY_BACKEND는 항상 설정
+          env.DEPLOY_BACKEND = params.DEPLOY_BACKEND.toString()
+          echo "DEPLOY_BACKEND: ${env.DEPLOY_BACKEND}"
+        }
+      }
+    }
     // ── STAGE 1 ──────────────────────────────────────────────
     // 코드에 비밀번호/API키 등 민감정보 노출 여부 검사
     // ─────────────────────────────────────────────────────────
@@ -36,13 +56,13 @@ pipeline {
             --exit-code 1 \
             --cache-dir /tmp/trivy-temp
         '''
-      }
+      } 
     }
     // ── STAGE 3 ──────────────────────────────────────────────
     // 백엔드 Python 코드 스타일/품질 검사
     // ─────────────────────────────────────────────────────────
     stage('린트 검사') {
-      steps {
+      steps { 
         sh '''
           set -e
           rm -rf .venv
@@ -123,13 +143,13 @@ pipeline {
     // ─────────────────────────────────────────────────────────
     stage('IMAGE_TAG 검증') {
     steps {
-      script {
-        if (!(params.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
-          error('IMAGE_TAG는 40자리 앱 레포 Git SHA여야 합니다. (예: a1b2c3d4...)')
+        script {
+          if (!(env.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
+            error('IMAGE_TAG는 40자리 Git SHA여야 합니다.')
+          }
+          echo "IMAGE_TAG 검증 완료: ${env.IMAGE_TAG}"
         }
-        echo "IMAGE_TAG 검증 완료: ${params.IMAGE_TAG}"
       }
-    }
   }
     // ── STAGE 7 ──────────────────────────────────────────────
     // 앱 레포 Git SHA로 Docker 이미지 빌드 후 ECR Push
