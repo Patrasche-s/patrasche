@@ -60,6 +60,7 @@
         helm upgrade --install external-dns external-dns/external-dns \
           --namespace {{ namespace }} \
           --set provider=aws \
+          --set domainFilters[0]=patrasche.cloud \
           --set txtOwnerId={{ eks_cluster }} \
           --set txtPrefix=external-dns- \
           --set serviceAccount.create=true \
