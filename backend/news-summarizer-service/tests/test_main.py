@@ -7,6 +7,7 @@ Ports: User 8000, Mail 8002, Summarizer 8004.
 from __future__ import annotations
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -75,3 +76,29 @@ def test_internal_news_list_returns_public_shape(client: TestClient) -> None:
     assert any(item.get("title") == "Internal list headline" for item in body["items"])
     assert body["items"][0]["source"] == "IT/테크"
     assert body["items"][0]["desc"] == "Summary for internal list"
+
+
+def test_post_summarize_keeps_response_shape(client: TestClient) -> None:
+    mocked = [
+        "[오늘의 한 줄]: 테스트\n\n[주요 내용]:\n- a\n- b\n\n🔗 원문 보기: https://example.com/1"
+    ]
+    with patch("main.summarize_news_list", return_value=mocked):
+        response = client.post(
+            "/summarize",
+            json={
+                "items": [
+                    {
+                        "title": "Headline",
+                        "link": "https://example.com/1",
+                        "category": "IT/테크",
+                        "rss_description": "desc",
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert list(body.keys()) == ["summaries"]
+    assert body["summaries"] == mocked
+
