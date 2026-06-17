@@ -101,4 +101,3 @@ def test_post_summarize_keeps_response_shape(client: TestClient) -> None:
     body = response.json()
     assert list(body.keys()) == ["summaries"]
     assert body["summaries"] == mocked
-
