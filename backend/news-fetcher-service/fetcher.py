@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List
+import logging
+from typing import Any, Dict, List
 
 import feedparser
 
-from rss_text import extract_author, extract_pub_date_utc, extract_rss_description
+from rss_text import (
+    extract_author,
+    extract_pub_date_utc,
+    extract_rss_description,
+    should_skip_article,
+)
+
+log = logging.getLogger("news-fetcher")
 
 RSS_FEEDS: Dict[str, str] = {
     "IT/테크": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
@@ -26,6 +34,8 @@ CATEGORY_SLUGS: Dict[str, str] = {
 }
 
 DEFAULT_NEWS_LIMIT = 3
+DEFAULT_MAX_RSS_SCAN = 20
+SPORTS_CATEGORY = "스포츠"
 
 
 def get_rss_url(category: str) -> str:
@@ -36,38 +46,82 @@ def get_rss_url(category: str) -> str:
     return RSS_FEEDS[category]
 
 
-def fetch_latest_news(category: str, *, limit: int = DEFAULT_NEWS_LIMIT) -> List[Dict[str, str]]:
+def fetch_latest_news(
+    category: str,
+    *,
+    limit: int = DEFAULT_NEWS_LIMIT,
+    max_scan: int = DEFAULT_MAX_RSS_SCAN,
+) -> List[Dict[str, str]]:
     """
     지정한 카테고리의 최신 뉴스 최대 limit건(제목/링크/description 등)을 리스트로 가져온다.
+    스포츠(Guardian)는 live·짧은 description 등 비정형 RSS 항목을 건너뛰고 다음 항목으로 채운다.
     피드에 글이 없으면 빈 리스트를 반환한다.
     """
     if limit < 1:
         raise ValueError("limit은 1 이상이어야 합니다.")
+    if max_scan < 1:
+        raise ValueError("max_scan은 1 이상이어야 합니다.")
 
     rss_url = get_rss_url(category)
     feed = feedparser.parse(rss_url)
     entries = getattr(feed, "entries", None) or []
 
     items: List[Dict[str, str]] = []
+    scanned = 0
     for entry in entries:
-        if len(items) >= limit:
+        if len(items) >= limit or scanned >= max_scan:
             break
+        scanned += 1
         title = str(entry.get("title", "")).strip()
         link = str(entry.get("link", "")).strip()
         if not title or not link:
             continue
+        rss_description = extract_rss_description(entry)
+        if category == SPORTS_CATEGORY:
+            skip, reason = should_skip_article(title, link, rss_description)
+            if skip:
+                log.info(
+                    "skip_article",
+                    extra={
+                        "event": "skip_article",
+                        "category": category,
+                        "reason": reason,
+                        "title": title,
+                        "link": link,
+                    },
+                )
+                continue
         items.append(
-            {
-                "category": category,
-                "title": title,
-                "link": link,
-                "rss_description": extract_rss_description(entry),
-                "feed_url": rss_url,
-                "pub_date_utc": extract_pub_date_utc(entry),
-                "author": extract_author(entry),
-            }
+            _entry_to_item(
+                category=category,
+                rss_url=rss_url,
+                title=title,
+                link=link,
+                rss_description=rss_description,
+                entry=entry,
+            )
         )
     return items
+
+
+def _entry_to_item(
+    *,
+    category: str,
+    rss_url: str,
+    title: str,
+    link: str,
+    rss_description: str,
+    entry: Any,
+) -> Dict[str, str]:
+    return {
+        "category": category,
+        "title": title,
+        "link": link,
+        "rss_description": rss_description,
+        "feed_url": rss_url,
+        "pub_date_utc": extract_pub_date_utc(entry),
+        "author": extract_author(entry),
+    }
 
 
 def fetch_latest_news_all_categories(
