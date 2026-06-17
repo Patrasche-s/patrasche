@@ -50,6 +50,39 @@ def extract_pub_date_utc(entry: Any) -> str:
     return str(published).strip()
 
 
+MIN_RSS_DESCRIPTION_LEN = 40
+
+_LIVE_LIKE_TITLE_KEYWORDS = (
+    "minute-by-minute",
+    "as it happened",
+    "latest updates",
+    "live updates",
+)
+
+
+def should_skip_article(title: str, link: str, description: str = "") -> tuple[bool, str | None]:
+    """
+    요약기에 부적합한 RSS 항목(live blog, 짧은 description 등)인지 판별한다.
+
+    Returns:
+        (skip, reason) — skip=True면 수집에서 제외. reason은 로그용 코드.
+    """
+    title_l = (title or "").lower()
+    link_l = (link or "").lower()
+    desc = (description or "").strip()
+
+    if "/live/" in link_l:
+        return True, "live_article_url"
+
+    if any(keyword in title_l for keyword in _LIVE_LIKE_TITLE_KEYWORDS):
+        return True, "live_like_title"
+
+    if not desc or len(desc) < MIN_RSS_DESCRIPTION_LEN:
+        return True, "too_short_description"
+
+    return False, None
+
+
 def extract_author(entry: Any) -> str:
     author = entry.get("author") or ""
     if author:
