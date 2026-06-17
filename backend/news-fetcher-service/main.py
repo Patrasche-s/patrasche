@@ -40,8 +40,8 @@ DEFAULT_SUMMARIZER_URL = "http://localhost:8004/summarize"
 DEFAULT_NEWS_STORE_BASE_URL = "http://localhost:8004"
 NEWS_STORE_HTTP_TIMEOUT = 60.0
 DEFAULT_HTTP_TIMEOUT_SECONDS = 600.0
-DEFAULT_HTTP_RETRIES_ON_QUOTA = 3
-FETCH_CRON_HOUR_KST = 6
+DEFAULT_HTTP_RETRIES_ON_QUOTA = 0
+FETCH_CRON_HOUR_KST = 15
 FETCH_CRON_MINUTE_KST = 0
 
 
@@ -144,7 +144,8 @@ def _env_bool(key: str, default: bool) -> bool:
 
 
 def _summarizer_http_should_retry(status_code: int) -> bool:
-    return status_code in (429, 502)
+    # 429는 quota를 더 소모하므로 HTTP 재시도하지 않는다. 502만 제한적으로 재시도.
+    return status_code == 502
 
 
 def _format_kst_datetime(value: datetime) -> str:
@@ -173,8 +174,8 @@ def _post_summarize_with_retries(
     max_extra_tries: int,
 ) -> Dict[str, Any]:
     """
-    첫 시도 + 429/502 시 최대 max_extra_tries번 재시도(총 1+max_extra_tries회까지).
-    retrying_count: 재시도 차수(0=첫 요청 직후 성공 또는 첫 시도 전, 1=첫 실패 후 첫 재시도 전 …).
+    첫 시도 + 502 시 최대 max_extra_tries번 재시도(총 1+max_extra_tries회까지).
+    429는 quota 절약을 위해 재시도하지 않는다.
     """
     total_attempts = 1 + max(0, max_extra_tries)
     last_error: BaseException | None = None

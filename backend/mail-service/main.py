@@ -31,9 +31,9 @@ from models import MailSendLog
 from schemas import NewsCardItem, NewsSummaryEmailRequest, VerifyEmailRequest
 from settings import settings
 
-FETCH_BATCH_HOUR_KST = 6
-NEWSLETTER_CRON_HOUR_KST = 7
-NEWSLETTER_CRON_MINUTE_KST = 0
+FETCH_BATCH_HOUR_KST = 15
+NEWSLETTER_CRON_HOUR_KST = 15
+NEWSLETTER_CRON_MINUTE_KST = 30
 
 logger = setup_service_logging("mail-service")
 scheduler = AsyncIOScheduler(timezone=SCHEDULER_TIMEZONE)

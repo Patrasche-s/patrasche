@@ -19,7 +19,7 @@ _SERVICE_DIR = Path(__file__).resolve().parent
 load_dotenv(_SERVICE_DIR / ".env", encoding="utf-8-sig")
 load_dotenv(encoding="utf-8-sig")
 
-FETCH_BATCH_HOUR_KST = 6
+FETCH_BATCH_HOUR_KST = 15
 logger = logging.getLogger("news-summarizer")
 
 
