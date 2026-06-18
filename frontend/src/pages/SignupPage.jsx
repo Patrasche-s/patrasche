@@ -11,23 +11,45 @@ const CATEGORIES = [
 ]
 
 export default function SignupPage({ onSignup }) {
-  const [email, setEmail] = useState('') //입력한 이메일 저장
-  const [selected, setSelected] = useState(['tech']) // 선택된 카테고리 목록 (기본값: tech)
+  const [email, setEmail] = useState('')
+  const [selected, setSelected] = useState(['tech'])
 
   const toggleCategory = (value) => {
     setSelected(prev =>
       prev.includes(value)
-        ? prev.filter(v => v !== value) // 이미 선택됨 -> 제거
-        : [...prev, value] // 선택안됨 -> 추가
+        ? prev.filter(v => v !== value)
+        : [...prev, value]
     )
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!email) return alert('이메일을 입력해주세요')
     if (selected.length === 0) return alert('카테고리를 하나 이상 선택해주세요')
-    // TODO: 백엔드 API 연결
-    alert(`구독 완료!\n이메일: ${email}\n카테고리: ${selected.join(', ')}`)
-    onSignup && onSignup({ email, categories: selected })
+
+    try {
+      const res = await fetch('/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, category: selected }),
+      })
+      const data = await res.json()
+
+      if (res.status === 201) {
+        // verification_pending: false 는 과도기 fallback — 동일하게 pending 화면으로 이동
+        onSignup && onSignup()
+      } else if (res.status === 409) {
+        const detail = data.detail || {}
+        if (detail.verification_pending) {
+          alert('이미 신청된 이메일입니다. 메일함에서 인증을 확인해주세요.')
+        } else {
+          alert('이미 구독 중인 이메일입니다.')
+        }
+      } else {
+        alert('오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
+      }
+    } catch {
+      alert('네트워크 오류가 발생했습니다.')
+    }
   }
 
   return (
@@ -71,7 +93,7 @@ export default function SignupPage({ onSignup }) {
       </button>
       <p className={styles.note}>
         비밀번호 없이 이메일만으로 구독할 수 있어요<br />
-        언제든지 구독을 취소할 수 있습니다
+        구독 취소 시 구독 정보가 삭제되며, 다시 구독하려면 이메일 인증이 필요합니다
       </p>
     </div>
   )
