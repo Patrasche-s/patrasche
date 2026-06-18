@@ -1,0 +1,286 @@
+pipeline {
+  agent any
+
+  parameters {
+    // 비우면 자동 트리거 시 현재 커밋 SHA 사용, 값 넣으면 해당 SHA 배포(롤백용)
+    string(name: 'IMAGE_TAG', defaultValue: '', description: '롤백/수동 배포용 Git SHA 40자리. 비우면 현재 커밋 자동 사용')
+    booleanParam(name: 'DEPLOY_BACKEND', defaultValue: true, description: 'backend 포함 전체 배포 (기본 true)')
+  }
+
+  environment {
+    ECR_REGISTRY      = credentials('ECR_REGISTRY')
+    SLACK_WEBHOOK_URL = credentials('SLACK_WEBHOOK_URL')
+    APP_ROLE_ARN      = credentials('APP_ROLE_ARN')
+    AWS_REGION        = 'ap-northeast-2'
+    EKS_CLUSTER_NAME  = 'patrasche-news'
+  }
+
+  stages {
+    // ── STAGE 0 ──────────────────────────────────────────────
+    // 배포 대상 IMAGE_TAG 결정
+    // 파라미터 값 있으면 사용(수동/롤백), 없으면 현재 커밋 SHA(자동 트리거)
+    // ─────────────────────────────────────────────────────────
+    stage('IMAGE_TAG 결정') {
+      steps {
+        script {
+          if (params.IMAGE_TAG?.trim()) {
+            env.IMAGE_TAG = params.IMAGE_TAG.trim()
+            echo "수동 지정 IMAGE_TAG: ${env.IMAGE_TAG}"
+          } else {
+            env.IMAGE_TAG = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+            echo "자동 추출 IMAGE_TAG (현재 커밋): ${env.IMAGE_TAG}"
+          }
+          // 수동/자동 공통 — DEPLOY_BACKEND는 항상 설정
+          env.DEPLOY_BACKEND = params.DEPLOY_BACKEND.toString()
+          echo "DEPLOY_BACKEND: ${env.DEPLOY_BACKEND}"
+        }
+      }
+    }
+    // ── STAGE 1 ──────────────────────────────────────────────
+    // 코드에 비밀번호/API키 등 민감정보 노출 여부 검사
+    // ─────────────────────────────────────────────────────────
+    stage('Gitleaks 보안 스캔') {
+      steps {
+        sh 'gitleaks detect --source . --exit-code 1'
+      }
+    }
+    // ── STAGE 2 ──────────────────────────────────────────────
+    // 코드/패키지의 HIGH, CRITICAL 보안 취약점 검사
+    // ─────────────────────────────────────────────────────────
+    stage('Trivy 보안 스캔') {
+      steps {
+        sh '''
+          mkdir -p /tmp/trivy-temp
+          trivy fs . \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --cache-dir /tmp/trivy-temp
+        '''
+      } 
+    }
+    // ── STAGE 3 ──────────────────────────────────────────────
+    // 백엔드 Python 코드 스타일/품질 검사
+    // ─────────────────────────────────────────────────────────
+    stage('린트 검사') {
+      steps { 
+        sh '''
+          set -e
+          rm -rf .venv
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install flake8
+          flake8 backend/mail-service \
+            --max-line-length=130 \
+            --exclude=backend/mail-service/alembic
+          flake8 backend/news-fetcher-service \
+            --max-line-length=130 \
+            --exclude=backend/news-fetcher-service/alembic
+          flake8 backend/news-summarizer-service \
+            --max-line-length=130 \
+            --exclude=backend/news-summarizer-service/alembic
+          flake8 backend/user-service \
+            --max-line-length=130 \
+            --exclude=backend/user-service/alembic
+          deactivate
+          rm -rf .venv
+        '''
+      }
+    }
+    // ── STAGE 4 ──────────────────────────────────────────────
+    // 백엔드 서비스별 단위 테스트 실행
+    // mail, fetcher, summarizer, user 서비스
+    // ─────────────────────────────────────────────────────────
+    stage('테스트') {
+      environment {
+        DB_URL           = credentials('DB_URL')
+        SMTP_HOST        = credentials('SMTP_HOST')
+        SMTP_PORT        = credentials('SMTP_PORT')
+        SMTP_USER        = credentials('SMTP_USER')
+        SMTP_PASS        = credentials('SMTP_PASS')
+        ENABLE_SCHEDULER = 'false'
+      }
+      steps {
+        sh '''
+          set -e
+          rm -rf .venv
+          python3 -m venv .venv
+          . .venv/bin/activate
+          which python
+          which pip
+          python -c "import sys; print(sys.executable)"
+          pip install --upgrade pip setuptools wheel
+          pip install pytest "anyio[trio]"
+          pip install -r backend/mail-service/requirements.txt
+          pip install --upgrade pyOpenSSL cryptography
+          cd backend/mail-service && pytest tests/ -v && cd ../..
+          pip install -r backend/news-fetcher-service/requirements.txt
+          cd backend/news-fetcher-service && pytest tests/ -v && cd ../..
+          pip install -r backend/news-summarizer-service/requirements.txt
+          cd backend/news-summarizer-service && pytest tests/ -v && cd ../..
+          pip install -r backend/user-service/requirements.txt
+          cd backend/user-service && pytest tests/ -v && cd ../..
+          deactivate
+          rm -rf .venv
+        '''
+      }
+    }
+    // ── STAGE 5 ──────────────────────────────────────────────
+    // Jenkins IAM User → jenkins-app-role로 임시 자격증명 발급
+    // ECR Push, patrasche 네임스페이스 배포 권한 획득
+    // ─────────────────────────────────────────────────────────
+    stage('AWS Assume Role') {
+      steps {
+        script {
+          assumeAwsRole('jenkins-app-deploy-session', env.APP_ROLE_ARN)
+        }
+      }
+    }
+    // ── STAGE 6 ──────────────────────────────────────────────
+    // IMAGE_TAG 40자리 Git SHA 형식 검증
+    // ECR에 해당 태그 이미지 존재 여부 확인
+    // latest 및 빈 값 거부
+    // ─────────────────────────────────────────────────────────
+    stage('IMAGE_TAG 검증') {
+    steps {
+        script {
+          if (!(env.IMAGE_TAG ==~ /^[0-9a-f]{40}$/)) {
+            error('IMAGE_TAG는 40자리 Git SHA여야 합니다.')
+          }
+          echo "IMAGE_TAG 검증 완료: ${env.IMAGE_TAG}"
+        }
+      }
+  }
+    // ── STAGE 7 ──────────────────────────────────────────────
+    // 앱 레포 Git SHA로 Docker 이미지 빌드 후 ECR Push
+    // 동일 SHA 이미지가 이미 있으면 빌드 스킵
+    // ─────────────────────────────────────────────────────────
+    stage('Docker Build & Push') {
+      steps {
+        sh '''
+          set -eu
+          echo "=== Docker Build & Push 시작 ==="
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          if aws ecr describe-images \
+            --repository-name patrasche-webserving \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" > /dev/null 2>&1; then
+            echo "이미지 이미 존재: patrasche-webserving:$IMAGE_TAG → 빌드 스킵"
+          else
+            docker build -t "$ECR_REGISTRY/patrasche-webserving:$IMAGE_TAG" \
+              --build-arg "VITE_API_BASE_URL=https://api.patrasche.cloud" \
+              -f frontend/Dockerfile \
+              frontend
+            docker push "$ECR_REGISTRY/patrasche-webserving:$IMAGE_TAG"
+          fi
+
+          for repo_info in \
+            "patrasche-backend:Dockerfile.user" \
+            "patrasche-crawler:Dockerfile.fetcher" \
+            "patrasche-analyzer:Dockerfile.summarizer" \
+            "patrasche-notifier:Dockerfile.mail"; do
+            REPO=$(echo $repo_info | cut -d: -f1)
+            DOCKERFILE=$(echo $repo_info | cut -d: -f2)
+            if aws ecr describe-images \
+              --repository-name "$REPO" \
+              --image-ids imageTag="$IMAGE_TAG" \
+              --region "$AWS_REGION" > /dev/null 2>&1; then
+              echo "이미지 이미 존재: $REPO:$IMAGE_TAG → 빌드 스킵"
+            else
+              docker build -t "$ECR_REGISTRY/$REPO:$IMAGE_TAG" \
+                -f "backend/$DOCKERFILE" \
+                backend
+              docker push "$ECR_REGISTRY/$REPO:$IMAGE_TAG"
+            fi
+          done
+        '''
+      }
+    }
+    
+    // ── STAGE 8 ──────────────────────────────────────────────
+    // ECR에 이미 올라간 이미지를 EKS에 재배포
+    // DEPLOY_BACKEND=false → 프론트만 재배포
+    // DEPLOY_BACKEND=true  → 프론트 + 백엔드 재배포
+    // ─────────────────────────────────────────────────────────
+    stage('Ansible 배포') {
+      steps {
+        sh '''
+          aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+
+          ansible-playbook \
+            -i ansible/inventory.ini \
+            ansible/deploy.yml \
+            --extra-vars "image_tag=$IMAGE_TAG ecr_registry=$ECR_REGISTRY deploy_backend=$DEPLOY_BACKEND"
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      sh '''
+        curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H 'Content-type: application/json' \
+        -d '{"text":"✅ *[patrasche-app]* 배포 완료!"}'
+      '''
+    }
+    failure {
+      sh '''
+        curl -X POST "$SLACK_WEBHOOK_URL" \
+        -H 'Content-type: application/json' \
+        -d '{"text":"❌ *[patrasche-app]* 배포 실패!\n확인 필요"}'
+      '''
+    }
+  }
+}
+
+def assumeAwsRole(String sessionName, String roleArn) {
+  withCredentials([
+    string(credentialsId: 'AWS_ACCESS_KEY_ID', variable: 'BASE_KEY'),
+    string(credentialsId: 'AWS_SECRET_ACCESS_KEY', variable: 'BASE_SECRET')
+  ]) {
+    def credsStr = sh(script: """
+      AWS_ACCESS_KEY_ID=\$BASE_KEY \
+      AWS_SECRET_ACCESS_KEY=\$BASE_SECRET \
+      AWS_SESSION_TOKEN="" \
+      aws sts assume-role \
+        --role-arn "${roleArn}" \
+        --role-session-name "${sessionName}" \
+        --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+        --output text
+    """, returnStdout: true).trim()
+
+    def credsList = credsStr.tokenize()
+
+    if (credsList.size() < 3) {
+      error "AssumeRole failed: STS credentials were not returned"
+    }
+
+    env.AWS_ACCESS_KEY_ID     = credsList[0]
+    env.AWS_SECRET_ACCESS_KEY = credsList[1]
+    env.AWS_SESSION_TOKEN     = credsList[2]
+
+    echo "AWS_ACCESS_KEY_ID exists? ${env.AWS_ACCESS_KEY_ID ? 'YES' : 'NO'}"
+    echo "AWS_SESSION_TOKEN exists? ${env.AWS_SESSION_TOKEN ? 'YES' : 'NO'}"
+
+    sh '''
+      set -eu
+      IDENTITY_ARN=$(aws sts get-caller-identity --query Arn --output text)
+      echo "Current AWS Identity: $IDENTITY_ARN"
+      case "$IDENTITY_ARN" in
+        *":assumed-role/jenkins-app-role/"*)
+          echo "OK: assumed app role"
+          ;;
+        *)
+          echo "ERROR: not using deploy role. Current identity: $IDENTITY_ARN"
+          exit 1
+          ;;
+      esac
+    '''
+  }
+}

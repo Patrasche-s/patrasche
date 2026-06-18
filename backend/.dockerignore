@@ -1,0 +1,16 @@
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/*.pyc
+**/*.pyo
+**/*.sqlite
+**/*.db
+**/.env
+**/tests/
+**/.DS_Store
+**/Thumbs.db
+**/.vscode/
+**/.idea/

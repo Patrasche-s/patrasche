@@ -1,0 +1,48 @@
+- name: EKS 애플리케이션 최신 이미지 배포 및 무중단 검증
+  hosts: eks
+  vars:
+    eks_cluster: patrasche-news
+    namespace: patrasche
+    aws_region: ap-northeast-2
+  tasks:
+    - name: image_tag 검증
+      ansible.builtin.fail:
+        msg: "image_tag가 정의되지 않았거나 비어있거나 latest입니다. 40자리 Git SHA를 입력해주세요."
+      when: >
+        image_tag is not defined or
+        image_tag == '' or
+        image_tag == 'latest' or
+        image_tag | length != 40
+
+    - name: kubeconfig 업데이트
+      ansible.builtin.shell: |
+        aws eks update-kubeconfig \
+          --name {{ eks_cluster }} \
+          --region {{ aws_region }}
+
+    - name: 백엔드 이미지 타겟 업데이트 (Deployment & CronJob)
+      ansible.builtin.shell: |
+        kubectl set image deployment/user-deployment user-service={{ ecr_registry }}/patrasche-backend:{{ image_tag }} -n {{ namespace }}
+        kubectl set image deployment/summarizer-deployment summarizer-service={{ ecr_registry }}/patrasche-analyzer:{{ image_tag }} -n {{ namespace }}
+        kubectl set image deployment/mail-deployment mail-service={{ ecr_registry }}/patrasche-notifier:{{ image_tag }} -n {{ namespace }}
+        kubectl set image cronjob/fetcher-cronjob fetcher={{ ecr_registry }}/patrasche-crawler:{{ image_tag }} -n {{ namespace }}
+      when: deploy_backend | bool
+
+    - name: 프론트엔드 이미지 배포
+      ansible.builtin.shell: |
+        kubectl set image deployment/webserving-deployment nginx={{ ecr_registry }}/patrasche-webserving:{{ image_tag }} -n {{ namespace }}
+
+    - name: 백엔드 활성상태 무중단 검증 (Rollout Status)
+      ansible.builtin.shell: |
+        kubectl get pods -n {{ namespace }}
+        kubectl rollout status deployment/user-deployment -n {{ namespace }} --timeout=600s
+        kubectl rollout status deployment/summarizer-deployment -n {{ namespace }} --timeout=600s
+        kubectl rollout status deployment/mail-deployment -n {{ namespace }} --timeout=600s
+        kubectl get cronjob/fetcher-cronjob -n {{ namespace }}
+      when: deploy_backend | bool
+
+    - name: 프론트엔드 활성상태 무중단 검증 (Rollout Status)
+      ansible.builtin.shell: |
+        kubectl get pods -n {{ namespace }}
+        kubectl describe deployment webserving-deployment -n {{ namespace }}
+        kubectl rollout status deployment/webserving-deployment -n {{ namespace }} --timeout=600s
