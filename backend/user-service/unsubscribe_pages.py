@@ -27,7 +27,8 @@ _COMPLETE_HTML = """<!DOCTYPE html>
 <head><meta charset="UTF-8" /><title>구독 취소 완료</title></head>
 <body style="font-family:sans-serif;text-align:center;padding:48px 24px;">
   <h1>구독이 취소되었습니다</h1>
-  <p>더 이상 뉴스레터를 받지 않습니다.</p>
+  <p>더 이상 뉴스레터를 받지 않으며, 구독 정보가 삭제되었습니다.</p>
+  <p style="font-size:14px;color:#666;">다시 구독하시려면 이메일 인증이 필요합니다.</p>
 </body>
 </html>"""
 
