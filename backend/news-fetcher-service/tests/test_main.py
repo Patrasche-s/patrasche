@@ -59,3 +59,55 @@ def test_lifespan_does_not_start_scheduler() -> None:
         assert test_client.get("/health").status_code == 200
         assert fetcher_main.scheduler.running is False
     assert fetcher_main.scheduler.running is False
+
+
+def test_run_pipeline_saves_partial_summaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    category = "경제"
+    items = [
+        {
+            "title": "T0",
+            "link": "https://example.com/0",
+            "category": category,
+            "rss_description": "d0",
+        },
+        {
+            "title": "T1",
+            "link": "https://example.com/1",
+            "category": category,
+            "rss_description": "d1",
+        },
+        {
+            "title": "T2",
+            "link": "https://example.com/2",
+            "category": category,
+            "rss_description": "d2",
+        },
+    ]
+
+    monkeypatch.setattr(
+        fetcher_main,
+        "fetch_latest_news_all_categories",
+        lambda limit: {category: items},
+    )
+    monkeypatch.setattr(fetcher_main, "upload_rss_snapshot", lambda *args, **kwargs: "s3/key")
+    monkeypatch.setattr(fetcher_main, "_http_get_existing_links", lambda client, links: set())
+
+    saved_links: list[str] = []
+
+    def mock_post_news(client, body):
+        saved_links.append(body["link"])
+        return True
+
+    monkeypatch.setattr(fetcher_main, "_http_post_news", mock_post_news)
+
+    def mock_summarize(client, url, payload, **kwargs):
+        return {"summaries": ["summary0", None, "summary2"]}
+
+    monkeypatch.setattr(fetcher_main, "_post_summarize_with_retries", mock_summarize)
+
+    stats = fetcher_main.run_pipeline(summarizer_http_max_extra_tries=0)
+
+    assert stats["saved"] == 2
+    assert stats["failed"] == 1
+    assert stats["summarized"] == 2
+    assert saved_links == ["https://example.com/0", "https://example.com/2"]

@@ -140,7 +140,7 @@ class SummarizeRequest(BaseModel):
 
 
 class SummarizeResponse(BaseModel):
-    summaries: List[str]
+    summaries: List[Optional[str]]
 
 
 @app.get("/health")
@@ -276,9 +276,16 @@ def summarize(req: SummarizeRequest) -> SummarizeResponse:
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    ok_count = sum(1 for summary in summaries if summary is not None)
+    fail_count = len(summaries) - ok_count
     logger.info(
         "summarize_success",
-        extra={"event": "summarize_success", "item_count": len(news_list), "summary_count": len(summaries)},
+        extra={
+            "event": "summarize_success",
+            "item_count": len(news_list),
+            "summary_count": ok_count,
+            "failed_count": fail_count,
+        },
     )
     return SummarizeResponse(summaries=summaries)
 
