@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import styles from './SignupPage.module.css'
+import { API_BASE_URL } from '../config/api';
 
 const CATEGORIES = [
   { emoji: '💻', name: 'IT/테크', value: 'tech' },
@@ -27,7 +28,7 @@ export default function SignupPage({ onSignup }) {
     if (selected.length === 0) return alert('카테고리를 하나 이상 선택해주세요')
 
     try {
-      const res = await fetch('/subscribe', {
+      const res = await fetch(`${API_BASE_URL}/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, category: selected }),
@@ -35,7 +36,6 @@ export default function SignupPage({ onSignup }) {
       const data = await res.json()
 
       if (res.status === 201) {
-        // verification_pending: false 는 과도기 fallback — 동일하게 pending 화면으로 이동
         onSignup && onSignup()
       } else if (res.status === 409) {
         const detail = data.detail || {}
