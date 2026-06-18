@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { API_BASE_URL } from '../config/api'
 import styles from './SignupPage.module.css'
+import { API_BASE_URL } from '../config/api';
 
 const CATEGORIES = [
   { emoji: '💻', name: 'IT/테크', value: 'tech' },
@@ -11,72 +11,44 @@ const CATEGORIES = [
   { emoji: '🏛️', name: '정치',   value: 'politics' },
 ]
 
-export default function SignupPage({ onSignup, onSignupComplete }) {
-  const [email, setEmail] = useState('') //입력한 이메일 저장
-  const [selected, setSelected] = useState(['tech']) // 선택된 카테고리 목록 (기본값: tech)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+export default function SignupPage({ onSignup }) {
+  const [email, setEmail] = useState('')
+  const [selected, setSelected] = useState(['tech'])
 
   const toggleCategory = (value) => {
     setSelected(prev =>
       prev.includes(value)
-        ? prev.filter(v => v !== value) // 이미 선택됨 -> 제거
-        : [...prev, value] // 선택안됨 -> 추가
+        ? prev.filter(v => v !== value)
+        : [...prev, value]
     )
   }
 
-  const handleSubmit = async() => {
+  const handleSubmit = async () => {
     if (!email) return alert('이메일을 입력해주세요')
     if (selected.length === 0) return alert('카테고리를 하나 이상 선택해주세요')
-    
+
     try {
-      setIsSubmitting(true)
-      const response = await fetch(`${API_BASE_URL}/subscribe`, {
+      const res = await fetch(`${API_BASE_URL}/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, category: selected })
+        body: JSON.stringify({ email, category: selected }),
       })
+      const data = await res.json()
 
-      if (response.status === 201) {
-        const data = await response.json()
-        if (data.verification_pending) {
-          alert('인증 메일을 보냈습니다. 메일함에서 인증을 완료해주세요 📧')
-          onSignup()
-        } else {
-          alert('구독이 다시 활성화되었습니다. 뉴스를 받아보실 수 있어요.')
-          onSignupComplete?.()
-        }
-        return
-      }
-
-      const data = await response.json()
-
-      if (response.status === 409) {
-        const detail = data.detail
-        const verificationPending =
-          typeof detail === 'object' && detail !== null
-            ? detail.verification_pending
-            : true
-        if (verificationPending) {
-          alert('이미 구독된 이메일입니다. 메일함에서 인증을 확인해주세요')
-          onSignup()
+      if (res.status === 201) {
+        onSignup && onSignup()
+      } else if (res.status === 409) {
+        const detail = data.detail || {}
+        if (detail.verification_pending) {
+          alert('이미 신청된 이메일입니다. 메일함에서 인증을 확인해주세요.')
         } else {
           alert('이미 구독 중인 이메일입니다.')
-          onSignupComplete?.()
         }
-        return
+      } else {
+        alert('오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
       }
-
-      if (response.status === 422) {
-        alert(data.detail || '이메일/카테고리 값을 확인해주세요')
-        return
-      }
-
-      alert('구독 신청 중 오류가 발생했습니다')
-
-    } catch (error) {
-      alert('구독 신청 중 오류가 발생했습니다')
-    } finally {
-      setIsSubmitting(false)
+    } catch {
+      alert('네트워크 오류가 발생했습니다.')
     }
   }
 
@@ -116,12 +88,12 @@ export default function SignupPage({ onSignup, onSignupComplete }) {
         ))}
       </div>
 
-      <button className={styles.btn} onClick={handleSubmit} disabled={isSubmitting}>
-        {isSubmitting ? '신청 중...' : '구독 시작하기'}
+      <button className={styles.btn} onClick={handleSubmit}>
+        구독 시작하기
       </button>
       <p className={styles.note}>
         비밀번호 없이 이메일만으로 구독할 수 있어요<br />
-        언제든지 구독을 취소할 수 있습니다
+        구독 취소 시 구독 정보가 삭제되며, 다시 구독하려면 이메일 인증이 필요합니다
       </p>
     </div>
   )
