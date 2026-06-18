@@ -33,7 +33,13 @@ export default function SignupPage({ onSignup }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, category: selected }),
       })
-      const data = await res.json()
+      
+      let data = {}
+      try {
+        data = await res.json()
+      } catch {
+        data = {}
+      }
 
       if (res.status === 201) {
         onSignup && onSignup()
