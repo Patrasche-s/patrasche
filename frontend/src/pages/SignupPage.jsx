@@ -44,6 +44,7 @@ export default function SignupPage({ onSignup }) {
         } else {
           alert('이미 구독 중인 이메일입니다.')
         }
+        onGoMain && onGoMain()
       } else {
         alert('오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
       }

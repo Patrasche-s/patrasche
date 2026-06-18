@@ -20,6 +20,7 @@ export default function App() {
       {page === 'signup' && (
         <SignupPage
           onSignup={() => setPage('pending')}
+          onGoMain={() => setPage('main')}
         />
       )}
       {page === 'pending' && (
@@ -41,6 +42,8 @@ export default function App() {
       {page === 'main' && (
         <MainPage />
       )}
+
+      
     </div>
   )
 }
