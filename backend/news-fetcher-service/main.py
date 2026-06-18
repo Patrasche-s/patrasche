@@ -15,7 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 
-from fetcher import DEFAULT_NEWS_LIMIT, fetch_latest_news_all_categories
+from fetcher import DEFAULT_MAX_RSS_SCAN, DEFAULT_NEWS_LIMIT, fetch_latest_news_all_categories
 from s3_snapshot import RssSnapshotStats, upload_rss_snapshot
 from json_logging import (
     SCHEDULER_TIMEZONE,
@@ -210,6 +210,30 @@ def _build_batch_metadata(*, scheduled_run_time: datetime | None = None) -> Dict
     }
 
 
+def _select_fresh_items(
+    items: List[Dict[str, str]],
+    existing_links: set[str],
+    *,
+    limit: int,
+) -> tuple[List[Dict[str, str]], int, int]:
+    if limit < 1:
+        raise ValueError("limit은 1 이상이어야 합니다.")
+
+    fresh_items: List[Dict[str, str]] = []
+    already_saved = 0
+    for item in items:
+        link = item.get("link")
+        if not link:
+            continue
+        if link in existing_links:
+            already_saved += 1
+            continue
+        if len(fresh_items) < limit:
+            fresh_items.append(item)
+
+    return fresh_items, already_saved, max(0, limit - len(fresh_items))
+
+
 def _post_summarize_with_retries(
     client: httpx.Client,
     url: str,
@@ -351,6 +375,7 @@ def run_pipeline(
         if summarizer_http_max_extra_tries is not None
         else _env_int("SUMMARIZER_HTTP_MAX_EXTRA_TRIES", DEFAULT_HTTP_RETRIES_ON_QUOTA)
     )
+    candidate_scan_limit = max(effective_limit, DEFAULT_MAX_RSS_SCAN)
 
     url = (summarizer_url or os.environ.get("SUMMARIZER_URL") or DEFAULT_SUMMARIZER_URL).rstrip("/")
     if not url.endswith("/summarize"):
@@ -363,6 +388,7 @@ def run_pipeline(
             "summarizer_url": url,
             "news_store_base_url": _news_store_base_url(),
             "news_per_category_limit": effective_limit,
+            "rss_candidate_scan_limit": candidate_scan_limit,
             "summarizer_http_max_extra_tries": max_extra,
             "http_timeout_seconds": timeout,
             "batch_date_kst": (batch_metadata or {}).get("batch_date_kst"),
@@ -370,7 +396,10 @@ def run_pipeline(
         },
     )
 
-    fetched_by_category = fetch_latest_news_all_categories(limit=effective_limit)
+    fetched_by_category = fetch_latest_news_all_categories(
+        limit=candidate_scan_limit,
+        max_scan=candidate_scan_limit,
+    )
 
     stats: Dict[str, int] = {
         "fetched_total": 0,
@@ -400,11 +429,12 @@ def run_pipeline(
             stats["fetched_total"] += len(items)
             links = [item["link"] for item in items if item.get("link")]
             existing_links = _http_get_existing_links(client, links)
-            fresh_items: List[Dict[str, str]] = [
-                item for item in items if item.get("link") and item["link"] not in existing_links
-            ]
+            fresh_items, already_count, shortfall = _select_fresh_items(
+                items,
+                existing_links,
+                limit=effective_limit,
+            )
 
-            already_count = len(items) - len(fresh_items)
             stats["already_saved"] += already_count
             stats["to_summarize"] += len(fresh_items)
             logger.info(
@@ -415,6 +445,7 @@ def run_pipeline(
                     "fetched": len(items),
                     "already_saved": already_count,
                     "to_summarize": len(fresh_items),
+                    "shortfall": shortfall,
                 },
             )
 

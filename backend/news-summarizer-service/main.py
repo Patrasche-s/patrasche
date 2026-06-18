@@ -25,7 +25,7 @@ from json_logging import (
     setup_service_logging,
     uvicorn_log_config,
 )
-from summarizer import summarize_news_list
+from summarizer import DEFAULT_GEMINI_MODEL, summarize_news_list
 
 _env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(_env_path, encoding="utf-8-sig")
@@ -65,7 +65,7 @@ def _scheduler_readiness_job() -> Dict[str, Any]:
         raise RuntimeError("GEMINI_API_KEY가 설정되어 있지 않습니다.")
 
     return {
-        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
+        "gemini_model": os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
         "api_key_configured": True,
     }
 

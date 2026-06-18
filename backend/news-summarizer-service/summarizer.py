@@ -15,7 +15,8 @@ _env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(_env_path, encoding="utf-8-sig")
 load_dotenv(encoding="utf-8-sig")
 
-_DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+_DEFAULT_MODEL = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
 _LINK_LINE_PREFIX = "🔗 원문 보기:"
 
 

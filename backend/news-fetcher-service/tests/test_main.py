@@ -11,6 +11,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -87,7 +88,7 @@ def test_run_pipeline_saves_partial_summaries(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         fetcher_main,
         "fetch_latest_news_all_categories",
-        lambda limit: {category: items},
+        lambda limit, max_scan: {category: items},
     )
     monkeypatch.setattr(fetcher_main, "upload_rss_snapshot", lambda *args, **kwargs: "s3/key")
     monkeypatch.setattr(fetcher_main, "_http_get_existing_links", lambda client, links: set())
@@ -111,3 +112,90 @@ def test_run_pipeline_saves_partial_summaries(monkeypatch: pytest.MonkeyPatch) -
     assert stats["failed"] == 1
     assert stats["summarized"] == 2
     assert saved_links == ["https://example.com/0", "https://example.com/2"]
+
+
+def test_select_fresh_items_fills_limit_after_existing_links() -> None:
+    items = [
+        {"title": f"T{i}", "link": f"https://example.com/{i}", "category": "경제"}
+        for i in range(5)
+    ]
+
+    fresh_items, already_saved, shortfall = fetcher_main._select_fresh_items(
+        items,
+        {"https://example.com/0", "https://example.com/2"},
+        limit=3,
+    )
+
+    assert [item["link"] for item in fresh_items] == [
+        "https://example.com/1",
+        "https://example.com/3",
+        "https://example.com/4",
+    ]
+    assert already_saved == 2
+    assert shortfall == 0
+
+
+def test_select_fresh_items_reports_shortfall() -> None:
+    items = [
+        {"title": "Old 0", "link": "https://example.com/old-0", "category": "연예"},
+        {"title": "Old 1", "link": "https://example.com/old-1", "category": "연예"},
+        {"title": "New", "link": "https://example.com/new", "category": "연예"},
+    ]
+
+    fresh_items, already_saved, shortfall = fetcher_main._select_fresh_items(
+        items,
+        {"https://example.com/old-0", "https://example.com/old-1"},
+        limit=3,
+    )
+
+    assert [item["link"] for item in fresh_items] == ["https://example.com/new"]
+    assert already_saved == 2
+    assert shortfall == 2
+
+
+def test_run_pipeline_fetches_rss_candidates_up_to_scan_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, int] = {}
+
+    def mock_fetch_latest_news_all_categories(limit: int, max_scan: int):
+        seen["limit"] = limit
+        seen["max_scan"] = max_scan
+        return {}
+
+    monkeypatch.setattr(
+        fetcher_main,
+        "fetch_latest_news_all_categories",
+        mock_fetch_latest_news_all_categories,
+    )
+
+    stats = fetcher_main.run_pipeline(per_category_limit=3, summarizer_http_max_extra_tries=0)
+
+    assert seen == {"limit": fetcher_main.DEFAULT_MAX_RSS_SCAN, "max_scan": fetcher_main.DEFAULT_MAX_RSS_SCAN}
+    assert stats["to_summarize"] == 0
+
+
+def test_post_summarize_retries_once_after_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(502, text="temporary bad gateway", request=request)
+        return httpx.Response(200, json={"summaries": ["ok"]}, request=request)
+
+    monkeypatch.setattr(fetcher_main.time, "sleep", lambda seconds: None)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        body = fetcher_main._post_summarize_with_retries(
+            client,
+            "http://summarizer.test/summarize",
+            {"items": [{"title": "T"}]},
+            category="경제",
+            item_count=1,
+            max_extra_tries=1,
+        )
+
+    assert body == {"summaries": ["ok"]}
+    assert calls == 2
