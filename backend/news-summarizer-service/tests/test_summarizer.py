@@ -15,6 +15,7 @@ if str(_SERVICE_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVICE_DIR))
 
 from summarizer import (  # noqa: E402
+    DEFAULT_GEMINI_MODEL,
     _append_link_line,
     _parse_batch_response,
     _strip_json_fence,
@@ -82,6 +83,21 @@ def test_summarize_news_list_uses_single_gemini_call() -> None:
 
     assert mock_client.generate_content.call_count == 1
     assert len(summaries) == 3
+
+
+def test_summarize_news_list_uses_flash_lite_default_model() -> None:
+    items = _sample_items(1)
+    mock_client = MagicMock()
+    mock_client.generate_content.return_value = SimpleNamespace(
+        text=_batch_json_payload(items)
+    )
+
+    with patch("summarizer._require_api_key", return_value="test-key"):
+        with patch("google.generativeai.configure"):
+            with patch("google.generativeai.GenerativeModel", return_value=mock_client) as model_cls:
+                summarize_news_list(items)
+
+    model_cls.assert_called_once_with(DEFAULT_GEMINI_MODEL)
 
 
 def test_parse_batch_response_appends_link_line() -> None:

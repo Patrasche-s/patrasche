@@ -125,10 +125,13 @@ def _entry_to_item(
 
 
 def fetch_latest_news_all_categories(
-    *, limit: int = DEFAULT_NEWS_LIMIT
+    *, limit: int = DEFAULT_NEWS_LIMIT, max_scan: int = DEFAULT_MAX_RSS_SCAN
 ) -> Dict[str, List[Dict[str, str]]]:
     """모든 카테고리의 최신 뉴스를 각각 최대 limit건씩 가져온다."""
-    return {category: fetch_latest_news(category, limit=limit) for category in RSS_FEEDS}
+    return {
+        category: fetch_latest_news(category, limit=limit, max_scan=max_scan)
+        for category in RSS_FEEDS
+    }
 
 
 if __name__ == "__main__":
