@@ -11,7 +11,7 @@ const CATEGORIES = [
   { emoji: '🏛️', name: '정치',   value: 'politics' },
 ]
 
-export default function SignupPage({ onSignup }) {
+export default function SignupPage({ onSignup, onGoMain }) {
   const [email, setEmail] = useState('')
   const [selected, setSelected] = useState(['tech'])
 
@@ -33,7 +33,7 @@ export default function SignupPage({ onSignup }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, category: selected }),
       })
-      
+
       let data = {}
       try {
         data = await res.json()
