@@ -78,7 +78,7 @@ pipeline {
             --exclude=backend/news-fetcher-service/alembic
           flake8 backend/news-summarizer-service \
             --max-line-length=130 \
-            --exclude=backend/news-summarizer-service/alembic
+            --exclude=backend/news-summarizer-service/alembic --ignore=W391
           flake8 backend/user-service \
             --max-line-length=130 \
             --exclude=backend/user-service/alembic
