@@ -102,17 +102,21 @@ def test_get_unsubscribe_does_not_deactivate(client: TestClient) -> None:
         assert refreshed.is_active is True
 
 
-def test_post_unsubscribe_deactivates_and_keeps_token(client: TestClient) -> None:
+def test_post_unsubscribe_deletes_subscription_row(client: TestClient) -> None:
     row = _create_subscription(email=f"post-{uuid.uuid4().hex}@example.com", is_verified=True)
     token = row.unsubscribe_token
+    row_id = row.id
+    email = row.email
     response = client.post("/unsubscribe", data={"token": token})
     assert response.status_code == 200
     assert "구독이 취소되었습니다" in response.text
     with SessionLocal() as db:
-        refreshed = db.get(Subscription, row.id)
-        assert refreshed is not None
-        assert refreshed.is_active is False
-        assert refreshed.unsubscribe_token == token
+        assert db.get(Subscription, row_id) is None
+        assert db.query(Subscription).filter(Subscription.email == email).first() is None
+
+    stale = client.post("/unsubscribe", data={"token": token})
+    assert stale.status_code == 400
+    assert "유효하지 않은 링크" in stale.text
 
 
 def test_post_unsubscribe_invalid_token_returns_400_html(client: TestClient) -> None:
@@ -121,28 +125,33 @@ def test_post_unsubscribe_invalid_token_returns_400_html(client: TestClient) -> 
     assert "유효하지 않은 링크" in response.text
 
 
-def test_post_unsubscribe_already_cancelled(client: TestClient) -> None:
+def test_post_unsubscribe_after_delete_token_is_invalid(client: TestClient) -> None:
     row = _create_subscription(
-        email=f"cancelled-{uuid.uuid4().hex}@example.com",
+        email=f"once-{uuid.uuid4().hex}@example.com",
         is_verified=True,
-        is_active=False,
     )
-    response = client.post("/unsubscribe", data={"token": row.unsubscribe_token})
-    assert response.status_code == 200
-    assert "이미 취소된 구독" in response.text
+    token = row.unsubscribe_token
+    assert client.post("/unsubscribe", data={"token": token}).status_code == 200
+    response = client.post("/unsubscribe", data={"token": token})
+    assert response.status_code == 400
+    assert "유효하지 않은 링크" in response.text
 
 
-def test_internal_subscribers_excludes_inactive_unverified(client: TestClient) -> None:
+def test_internal_subscribers_excludes_deleted_subscription(client: TestClient) -> None:
     active_email = f"active-{uuid.uuid4().hex}@example.com"
-    inactive_email = f"inactive-{uuid.uuid4().hex}@example.com"
+    cancelled_email = f"cancelled-{uuid.uuid4().hex}@example.com"
     _create_subscription(email=active_email, is_verified=True, is_active=True)
-    _create_subscription(email=inactive_email, is_verified=True, is_active=False)
+    cancelled_row = _create_subscription(email=cancelled_email, is_verified=True, is_active=True)
+    assert (
+        client.post("/unsubscribe", data={"token": cancelled_row.unsubscribe_token}).status_code
+        == 200
+    )
 
     response = client.get("/internal/subscribers", headers=_INTERNAL_HEADERS)
     assert response.status_code == 200
     emails = {item["email"] for item in response.json()}
     assert active_email in emails
-    assert inactive_email not in emails
+    assert cancelled_email not in emails
 
 
 def test_internal_subscribers_requires_token(client: TestClient) -> None:
@@ -173,13 +182,14 @@ def test_internal_subscribers_excludes_active_unverified(client: TestClient) -> 
 
 
 @patch("main.send_verification_email", new_callable=AsyncMock)
-def test_resubscribe_reactivates_and_regenerates_unsubscribe_token(
-    _mock_mail: AsyncMock,
+def test_resubscribe_after_unsubscribe_requires_verification(
+    mock_mail: AsyncMock,
     client: TestClient,
 ) -> None:
     email = f"resub-{uuid.uuid4().hex}@example.com"
-    row = _create_subscription(email=email, is_verified=True, is_active=False)
-    old_unsub = row.unsubscribe_token
+    row = _create_subscription(email=email, is_verified=True, is_active=True)
+    token = row.unsubscribe_token
+    assert client.post("/unsubscribe", data={"token": token}).status_code == 200
 
     response = client.post(
         "/subscribe",
@@ -187,20 +197,16 @@ def test_resubscribe_reactivates_and_regenerates_unsubscribe_token(
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["verification_pending"] is False
-    assert "다시 활성화" in body["message"]
-    _mock_mail.assert_not_called()
+    assert body["verification_pending"] is True
+    assert "인증 메일" in body["message"]
+    mock_mail.assert_called_once()
 
     with SessionLocal() as db:
         refreshed = db.query(Subscription).filter(Subscription.email == email).first()
         assert refreshed is not None
-        assert refreshed.is_active is True
+        assert refreshed.is_verified is False
         assert refreshed.category == "경제"
-        assert refreshed.unsubscribe_token != old_unsub
-        assert refreshed.is_verified is True
-
-    stale_get = client.get("/unsubscribe", params={"token": old_unsub})
-    assert stale_get.status_code == 400
+        assert refreshed.unsubscribe_token
 
 
 @patch("main.send_verification_email", new_callable=AsyncMock)
@@ -209,7 +215,8 @@ def test_resubscribe_unverified_sends_verification_mail(
     client: TestClient,
 ) -> None:
     email = f"unverified-resub-{uuid.uuid4().hex}@example.com"
-    _create_subscription(email=email, is_verified=False, is_active=False)
+    row = _create_subscription(email=email, is_verified=True, is_active=True)
+    client.post("/unsubscribe", data={"token": row.unsubscribe_token})
 
     response = client.post(
         "/subscribe",
