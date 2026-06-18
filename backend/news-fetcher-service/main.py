@@ -111,6 +111,52 @@ def _http_post_news(client: httpx.Client, body: Dict[str, Any]) -> bool:
     return bool(payload.get("inserted"))
 
 
+def _save_summarized_news(
+    client: httpx.Client,
+    *,
+    news: Dict[str, Any],
+    summary_text: str,
+    batch_meta: Dict[str, Any],
+    stats: Dict[str, int],
+) -> None:
+    inserted = _http_post_news(
+        client,
+        {
+            "category": news["category"],
+            "title": news["title"],
+            "summary": summary_text,
+            "link": news["link"],
+            "s3_key": news.get("s3_key"),
+            "batch_date_kst": batch_meta.get("batch_date_kst"),
+            "scheduled_run_time_kst": batch_meta.get("scheduled_run_time_kst"),
+            "collected_at_kst": batch_meta.get("collected_at_kst"),
+        },
+    )
+    stats["summarized"] += 1
+    if inserted:
+        stats["saved"] += 1
+        logger.info(
+            "news_saved",
+            extra={
+                "event": "news_saved",
+                "category": news["category"],
+                "title": news["title"],
+                "link": news["link"],
+            },
+        )
+    else:
+        stats["save_ignored"] += 1
+        logger.info(
+            "news_save_skipped_duplicate",
+            extra={
+                "event": "news_save_skipped_duplicate",
+                "category": news["category"],
+                "title": news["title"],
+                "link": news["link"],
+            },
+        )
+
+
 def _env_int(key: str, default: int) -> int:
     raw = os.getenv(key)
     if raw is None or not str(raw).strip():
@@ -411,45 +457,42 @@ def run_pipeline(
                         f"요약 개수 불일치: 요청 {len(fresh_items)}건, 응답 {len(summaries)}건"
                     )
 
+                partial_failures = 0
                 for news, summary_text in zip(fresh_items, summaries):
+                    if summary_text is None:
+                        partial_failures += 1
+                        stats["failed"] += 1
+                        logger.warning(
+                            "news_summarize_skipped",
+                            extra={
+                                "event": "news_summarize_skipped",
+                                "category": category,
+                                "title": news.get("title"),
+                                "link": news.get("link"),
+                            },
+                        )
+                        continue
                     if not isinstance(summary_text, str):
                         raise RuntimeError("요약 항목이 문자열이 아닙니다.")
-                    inserted = _http_post_news(
+                    _save_summarized_news(
                         client,
-                        {
-                            "category": news["category"],
-                            "title": news["title"],
-                            "summary": summary_text,
-                            "link": news["link"],
-                            "s3_key": news.get("s3_key"),
-                            "batch_date_kst": batch_meta.get("batch_date_kst"),
-                            "scheduled_run_time_kst": batch_meta.get("scheduled_run_time_kst"),
-                            "collected_at_kst": batch_meta.get("collected_at_kst"),
+                        news=news,
+                        summary_text=summary_text,
+                        batch_meta=batch_meta,
+                        stats=stats,
+                    )
+
+                if partial_failures:
+                    logger.warning(
+                        "category_partial_summarize",
+                        extra={
+                            "event": "category_partial_summarize",
+                            "category": category,
+                            "requested": len(fresh_items),
+                            "failed": partial_failures,
+                            "saved": len(fresh_items) - partial_failures,
                         },
                     )
-                    stats["summarized"] += 1
-                    if inserted:
-                        stats["saved"] += 1
-                        logger.info(
-                            "news_saved",
-                            extra={
-                                "event": "news_saved",
-                                "category": news["category"],
-                                "title": news["title"],
-                                "link": news["link"],
-                            },
-                        )
-                    else:
-                        stats["save_ignored"] += 1
-                        logger.info(
-                            "news_save_skipped_duplicate",
-                            extra={
-                                "event": "news_save_skipped_duplicate",
-                                "category": news["category"],
-                                "title": news["title"],
-                                "link": news["link"],
-                            },
-                        )
             except httpx.HTTPStatusError as exc:
                 stats["failed"] += 1
                 body = (exc.response.text[:2000] if exc.response is not None else "") or ""

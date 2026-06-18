@@ -145,3 +145,50 @@ def test_parse_batch_response_fails_on_non_string_summary() -> None:
     raw = json.dumps({"summaries": [{"index": 0, "summary": 123}]})
     with pytest.raises(RuntimeError, match="문자열"):
         _parse_batch_response(raw, items)
+
+
+def test_batch_fail_single_fallback_partial_success() -> None:
+    items = _sample_items(3)
+    mock_client = MagicMock()
+    call_count = 0
+
+    def side_effect(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return SimpleNamespace(text="not-json")
+        if call_count == 3:
+            raise RuntimeError("single fail")
+        item_idx = 0 if call_count == 2 else 2
+        return SimpleNamespace(text=_batch_json_payload([items[item_idx]]))
+
+    mock_client.generate_content.side_effect = side_effect
+
+    with patch("summarizer._require_api_key", return_value="test-key"):
+        with patch("google.generativeai.configure"):
+            with patch("google.generativeai.GenerativeModel", return_value=mock_client):
+                result = summarize_news_list(items)
+
+    assert len(result) == 3
+    assert result[0] is not None
+    assert result[1] is None
+    assert result[2] is not None
+    assert mock_client.generate_content.call_count == 4
+
+
+def test_batch_fail_all_single_fail_raises() -> None:
+    items = _sample_items(2)
+    mock_client = MagicMock()
+    mock_client.generate_content.side_effect = [
+        SimpleNamespace(text="not-json"),
+        RuntimeError("single fail 0"),
+        RuntimeError("single fail 1"),
+    ]
+
+    with patch("summarizer._require_api_key", return_value="test-key"):
+        with patch("google.generativeai.configure"):
+            with patch("google.generativeai.GenerativeModel", return_value=mock_client):
+                with pytest.raises(RuntimeError, match="single fail 1"):
+                    summarize_news_list(items)
+
+    assert mock_client.generate_content.call_count == 3

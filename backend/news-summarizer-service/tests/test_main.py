@@ -101,3 +101,33 @@ def test_post_summarize_keeps_response_shape(client: TestClient) -> None:
     body = response.json()
     assert list(body.keys()) == ["summaries"]
     assert body["summaries"] == mocked
+
+
+def test_post_summarize_allows_null_summaries(client: TestClient) -> None:
+    mocked = [
+        "[오늘의 한 줄]: ok\n\n🔗 원문 보기: https://example.com/1",
+        None,
+    ]
+    with patch("main.summarize_news_list", return_value=mocked):
+        response = client.post(
+            "/summarize",
+            json={
+                "items": [
+                    {
+                        "title": "Headline 1",
+                        "link": "https://example.com/1",
+                        "category": "IT/테크",
+                        "rss_description": "desc 1",
+                    },
+                    {
+                        "title": "Headline 2",
+                        "link": "https://example.com/2",
+                        "category": "IT/테크",
+                        "rss_description": "desc 2",
+                    },
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["summaries"] == mocked

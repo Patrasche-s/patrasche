@@ -352,6 +352,86 @@ def _summarize_batch_with_retries(
     raise RuntimeError("요약 생성에 실패했습니다.")
 
 
+def _summarize_news_list_with_fallback(
+    client: Any,
+    news_list: List[Dict[str, Any]],
+    *,
+    max_retries: int,
+    timeout_seconds: Optional[int],
+) -> List[Optional[str]]:
+    """
+    1) 전체 batch 1회 시도
+    2) 실패(429 제외) 시 기사별 [item] batch 재시도
+    3) 입력과 동일 길이 리스트 반환; 실패 슬롯은 None
+    """
+    if not news_list:
+        return []
+
+    try:
+        return _summarize_batch_with_retries(
+            client,
+            news_list,
+            max_retries=max_retries,
+            timeout_seconds=timeout_seconds,
+        )
+    except BaseException as batch_exc:
+        if _is_retryable_rate_limit(batch_exc):
+            raise
+
+        log.warning(
+            "gemini_batch_fallback_single",
+            extra={
+                "event": "gemini_batch_fallback_single",
+                "batch_size": len(news_list),
+                "error_type": type(batch_exc).__name__,
+                "error": str(batch_exc)[:500],
+            },
+        )
+
+    results: List[Optional[str]] = []
+    last_item_error: Optional[BaseException] = None
+
+    for idx, news in enumerate(news_list):
+        try:
+            one = _summarize_batch_with_retries(
+                client,
+                [news],
+                max_retries=max_retries,
+                timeout_seconds=timeout_seconds,
+            )
+            results.append(one[0])
+        except BaseException as item_exc:
+            last_item_error = item_exc
+            if _is_retryable_rate_limit(item_exc):
+                log.warning(
+                    "gemini_single_rate_limited_skip",
+                    extra={
+                        "event": "gemini_single_rate_limited_skip",
+                        "index": idx,
+                        "link": news.get("link"),
+                    },
+                )
+            else:
+                log.warning(
+                    "gemini_single_item_failed",
+                    extra={
+                        "event": "gemini_single_item_failed",
+                        "index": idx,
+                        "link": news.get("link"),
+                        "error_type": type(item_exc).__name__,
+                        "error": str(item_exc)[:500],
+                    },
+                )
+            results.append(None)
+
+    if not any(summary is not None for summary in results):
+        if last_item_error is not None:
+            raise last_item_error
+        raise RuntimeError("요약 생성에 실패했습니다.")
+
+    return results
+
+
 def summarize_news(
     news: Dict[str, Any],
     *,
@@ -375,7 +455,10 @@ def summarize_news(
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
     )
-    return summaries[0]
+    summary = summaries[0]
+    if summary is None:
+        raise RuntimeError("요약 생성에 실패했습니다.")
+    return summary
 
 
 def iter_summarize_news(
@@ -401,14 +484,15 @@ def iter_summarize_news(
     api_key = _require_api_key()
     genai.configure(api_key=api_key)
     client = genai.GenerativeModel(model)
-    summaries = _summarize_batch_with_retries(
+    summaries = _summarize_news_list_with_fallback(
         client,
         news_list,
         max_retries=max_retries,
         timeout_seconds=timeout_seconds,
     )
     for news, summary in zip(news_list, summaries):
-        yield news, summary
+        if summary is not None:
+            yield news, summary
 
 
 def summarize_news_list(
@@ -418,21 +502,29 @@ def summarize_news_list(
     delay_seconds: float = _DEFAULT_DELAY_SECONDS,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     timeout_seconds: Optional[int] = None,
-) -> List[str]:
+) -> List[Optional[str]]:
     """
     뉴스 dict 리스트를 batch 1회 Gemini 호출로 요약한 문자열 리스트를 반환한다.
+    batch 실패 시 기사별 fallback을 시도하며, 실패 슬롯은 None이다.
     delay_seconds는 API 호환성을 위해 받지만 batch 내부에서는 사용하지 않는다.
     """
-    return [
-        text
-        for _, text in iter_summarize_news(
-            news_list,
-            model=model,
-            delay_seconds=delay_seconds,
-            max_retries=max_retries,
-            timeout_seconds=timeout_seconds,
-        )
-    ]
+    import google.generativeai as genai
+
+    _ = delay_seconds
+    if delay_seconds < 0:
+        raise ValueError("delay_seconds는 0 이상이어야 합니다.")
+    if not news_list:
+        return []
+
+    api_key = _require_api_key()
+    genai.configure(api_key=api_key)
+    client = genai.GenerativeModel(model)
+    return _summarize_news_list_with_fallback(
+        client,
+        news_list,
+        max_retries=max_retries,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 if __name__ == "__main__":
@@ -453,6 +545,8 @@ if __name__ == "__main__":
     )
     summaries = summarize_news_list(samples)
     for i, summary in enumerate(summaries, start=1):
+        if summary is None:
+            continue
         log.info(
             "summarizer_cli_result",
             extra={"event": "summarizer_cli_result", "index": i, "summary_preview": summary[:400]},
