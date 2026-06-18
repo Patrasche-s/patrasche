@@ -28,7 +28,6 @@ from models import Subscription
 from category_slugs import resolve_category_slug
 from schemas import InternalSubscriberOut, SubscribeCreate, SubscribeResponse
 from unsubscribe_pages import (
-    already_unsubscribed_html,
     confirm_unsubscribe_html,
     invalid_link_html,
     unsubscribe_complete_html,
@@ -387,38 +386,23 @@ async def subscribe(
                     "verification_pending": not existing.is_verified,
                 },
             )
-        existing.is_active = True
-        existing.category = category_csv
-        existing.unsubscribe_token = secrets.token_urlsafe(32)
-        send_verification = False
-        if existing.is_verified:
-            logger.info(
-                "취소된 구독을 재활성했습니다",
-                extra={
-                    "event": "subscription_reactivated_verified",
-                    "user_email": payload.email,
-                },
-            )
-        else:
-            existing.verification_token = secrets.token_urlsafe(32)
-            send_verification = True
-            logger.info(
-                "미인증 취소 구독을 재활성했습니다",
-                extra={
-                    "event": "subscription_reactivated_unverified",
-                    "user_email": payload.email,
-                },
-            )
+        logger.info(
+            "legacy inactive subscription removed before resubscribe",
+            extra={
+                "event": "subscription_legacy_inactive_deleted",
+                "user_email": payload.email,
+            },
+        )
         try:
+            db.delete(existing)
             db.commit()
-            db.refresh(existing)
         except OperationalError as exc:
             db.rollback()
             logger.critical(
                 "DB 저장에 실패했습니다",
                 extra={
                     "event": "database_connection_failed",
-                    "operation": "subscribe_reactivate_commit",
+                    "operation": "subscribe_legacy_inactive_delete",
                     "error": str(exc),
                     "error_type": "OperationalError",
                 },
@@ -427,24 +411,6 @@ async def subscribe(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="DB 연결에 실패했습니다.",
             ) from exc
-        if send_verification:
-            background_tasks.add_task(
-                send_verification_email,
-                payload.email,
-                existing.verification_token,
-            )
-            return SubscribeResponse(
-                message="구독 신청 완료, 인증 메일 발송 대기",
-                email=existing.email,
-                category=_format_categories_for_popup(_deserialize_categories(existing.category)),
-                verification_pending=True,
-            )
-        return SubscribeResponse(
-            message="구독이 다시 활성화되었습니다",
-            email=existing.email,
-            category=_format_categories_for_popup(_deserialize_categories(existing.category)),
-            verification_pending=False,
-        )
 
     verification_token = secrets.token_urlsafe(32)
     unsubscribe_token = secrets.token_urlsafe(32)
@@ -522,14 +488,12 @@ def unsubscribe_confirm(token: str = Query(..., min_length=1), db: Session = Dep
             extra={"event": "unsubscribe_invalid_token"},
         )
         return HTMLResponse(content=invalid_link_html(), status_code=status.HTTP_400_BAD_REQUEST)
-    if not subscriber.is_active:
-        return HTMLResponse(content=already_unsubscribed_html(), status_code=status.HTTP_200_OK)
     return HTMLResponse(content=confirm_unsubscribe_html(token), status_code=status.HTTP_200_OK)
 
 
 @app.post("/unsubscribe", response_class=HTMLResponse)
 def unsubscribe_execute(token: str = Form(...), db: Session = Depends(get_db)):
-    """Deactivate subscription; keeps unsubscribe_token for idempotent 'already cancelled'."""
+    """Delete subscription row on cancel (hard delete)."""
     subscriber = _find_by_unsubscribe_token(db, token)
     if subscriber is None:
         logger.warning(
@@ -537,10 +501,9 @@ def unsubscribe_execute(token: str = Form(...), db: Session = Depends(get_db)):
             extra={"event": "unsubscribe_post_invalid_token"},
         )
         return HTMLResponse(content=invalid_link_html(), status_code=status.HTTP_400_BAD_REQUEST)
-    if not subscriber.is_active:
-        return HTMLResponse(content=already_unsubscribed_html(), status_code=status.HTTP_200_OK)
 
-    subscriber.is_active = False
+    cancelled_email = subscriber.email
+    db.delete(subscriber)
     try:
         db.commit()
     except OperationalError as exc:
@@ -560,7 +523,7 @@ def unsubscribe_execute(token: str = Form(...), db: Session = Depends(get_db)):
         ) from exc
     logger.info(
         "구독이 취소되었습니다",
-        extra={"event": "unsubscribe_success", "user_email": subscriber.email},
+        extra={"event": "unsubscribe_success", "user_email": cancelled_email},
     )
     return HTMLResponse(content=unsubscribe_complete_html(), status_code=status.HTTP_200_OK)
 

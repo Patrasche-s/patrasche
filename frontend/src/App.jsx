@@ -20,7 +20,6 @@ export default function App() {
       {page === 'signup' && (
         <SignupPage
           onSignup={() => setPage('pending')}
-          onSignupComplete={() => setPage('main')}
         />
       )}
       {page === 'pending' && (
