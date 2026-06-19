@@ -4,6 +4,7 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime
+from typing import Any
 
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -218,7 +219,12 @@ async def api_news_list(
     if isinstance(payload, list):
         return {"items": payload}
     if isinstance(payload, dict) and isinstance(payload.get("items"), list):
-        return {"items": payload["items"]}
+        result: dict[str, Any] = {"items": payload["items"]}
+        if "batch_date" in payload:
+            result["batch_date"] = payload["batch_date"]
+        if "is_fallback" in payload:
+            result["is_fallback"] = payload["is_fallback"]
+        return result
     return {"items": []}
 
 

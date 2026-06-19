@@ -14,6 +14,7 @@ from category_slugs import resolve_category_slug
 from database import (
     get_existing_links,
     list_newsletter_rows_for_batch,
+    resolve_newsletter_rows_for_batch,
     save_news,
 )
 from json_logging import (
@@ -215,14 +216,18 @@ def internal_news_list(
             detail=f"허용되지 않은 category slug입니다: {category}",
         )
 
-    effective_date = batch_date or _today_kst()
-    rows = list_newsletter_rows_for_batch(effective_date)
-    items = [
-        _row_to_public_news_item(row)
-        for row in rows
-        if str(row.get("category", "")) == label
-    ]
-    return {"items": items}
+    requested_date = batch_date or _today_kst()
+    resolved = resolve_newsletter_rows_for_batch(
+        requested_date,
+        fallback_to_latest=batch_date is None,
+        category=label,
+    )
+    items = [_row_to_public_news_item(row) for row in resolved.rows]
+    return {
+        "items": items,
+        "batch_date": resolved.batch_date_kst,
+        "is_fallback": resolved.is_fallback,
+    }
 
 
 @app.post("/summarize", response_model=SummarizeResponse)

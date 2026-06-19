@@ -6,7 +6,7 @@ import os
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, NamedTuple, Set
 
 from dotenv import load_dotenv
 from sqlalchemy import DateTime, Index, String, Text, create_engine, func, select, text
@@ -74,6 +74,12 @@ class SummarizedNews(Base):
     scheduled_run_time_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
     collected_at_kst: Mapped[str | None] = mapped_column(String(64), nullable=True)
     s3_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
+class NewsletterRowsResult(NamedTuple):
+    rows: List[Dict[str, Any]]
+    batch_date_kst: str
+    is_fallback: bool
 
 
 def save_news(news_data: Dict[str, Any]) -> bool:
@@ -152,34 +158,105 @@ def _batch_window_utc(batch_date: date) -> tuple[str, str]:
     )
 
 
-def list_newsletter_rows_for_batch(batch_date: date) -> List[Dict[str, Any]]:
-    """메일 뉴스레터용: batch_date_kst 우선, 없으면 created_at UTC 구간 폴백."""
+def _query_rows_for_batch_date(session: Any, batch_date_kst: str) -> List[Dict[str, Any]]:
+    q = text(
+        """
+        SELECT category, title, summary, link, created_at, batch_date_kst, scheduled_run_time_kst
+        FROM summarized_news
+        WHERE batch_date_kst = :bd
+        ORDER BY category ASC, id DESC
+        """
+    )
+    rows = session.execute(q, {"bd": batch_date_kst}).mappings().all()
+    return [_mapping_row(r) for r in rows]
+
+
+def _query_rows_for_legacy_created_window(session: Any, batch_date: date) -> List[Dict[str, Any]]:
+    start, end = _batch_window_utc(batch_date)
+    q = text(
+        """
+        SELECT category, title, summary, link, created_at,
+               NULL AS batch_date_kst, NULL AS scheduled_run_time_kst
+        FROM summarized_news
+        WHERE created_at >= :start_utc AND created_at < :end_utc
+        ORDER BY category ASC, id DESC
+        """
+    )
+    rows = session.execute(q, {"start_utc": start, "end_utc": end}).mappings().all()
+    return [_mapping_row(r) for r in rows]
+
+
+def _latest_batch_date_on_or_before(session: Any, batch_date: date) -> str | None:
+    q = text(
+        """
+        SELECT MAX(batch_date_kst)
+        FROM summarized_news
+        WHERE batch_date_kst IS NOT NULL
+          AND batch_date_kst <= :bd
+        """
+    )
+    value = session.execute(q, {"bd": batch_date.isoformat()}).scalar()
+    return str(value) if value else None
+
+
+def _latest_batch_date_for_category_on_or_before(
+    session: Any,
+    batch_date: date,
+    category: str,
+) -> str | None:
+    q = text(
+        """
+        SELECT MAX(batch_date_kst)
+        FROM summarized_news
+        WHERE batch_date_kst IS NOT NULL
+          AND batch_date_kst <= :bd
+          AND category = :category
+        """
+    )
+    value = session.execute(
+        q,
+        {"bd": batch_date.isoformat(), "category": category},
+    ).scalar()
+    return str(value) if value else None
+
+
+def resolve_newsletter_rows_for_batch(
+    batch_date: date,
+    *,
+    fallback_to_latest: bool = False,
+    category: str | None = None,
+) -> NewsletterRowsResult:
+    """Resolve newsletter rows and report whether a prior batch was used."""
+    requested = batch_date.isoformat()
     try:
         with SessionLocal() as session:
-            q1 = text(
-                """
-                SELECT category, title, summary, link, created_at, batch_date_kst, scheduled_run_time_kst
-                FROM summarized_news
-                WHERE batch_date_kst = :bd
-                ORDER BY category ASC, id DESC
-                """
-            )
-            rows = session.execute(q1, {"bd": batch_date.isoformat()}).mappings().all()
+            rows = _query_rows_for_batch_date(session, requested)
+            if category is not None:
+                rows = [row for row in rows if str(row.get("category", "")) == category]
             if rows:
-                return [_mapping_row(r) for r in rows]
+                return NewsletterRowsResult(rows=rows, batch_date_kst=requested, is_fallback=False)
 
-            start, end = _batch_window_utc(batch_date)
-            q2 = text(
-                """
-                SELECT category, title, summary, link, created_at,
-                       NULL AS batch_date_kst, NULL AS scheduled_run_time_kst
-                FROM summarized_news
-                WHERE created_at >= :start_utc AND created_at < :end_utc
-                ORDER BY category ASC, id DESC
-                """
-            )
-            rows2 = session.execute(q2, {"start_utc": start, "end_utc": end}).mappings().all()
-            return [_mapping_row(r) for r in rows2]
+            if fallback_to_latest:
+                latest = (
+                    _latest_batch_date_for_category_on_or_before(session, batch_date, category)
+                    if category is not None
+                    else _latest_batch_date_on_or_before(session, batch_date)
+                )
+                if latest and latest != requested:
+                    fallback_rows = _query_rows_for_batch_date(session, latest)
+                    if category is not None:
+                        fallback_rows = [
+                            row for row in fallback_rows if str(row.get("category", "")) == category
+                        ]
+                    if fallback_rows:
+                        return NewsletterRowsResult(rows=fallback_rows, batch_date_kst=latest, is_fallback=True)
+
+            legacy_rows = _query_rows_for_legacy_created_window(session, batch_date)
+            if category is not None:
+                legacy_rows = [
+                    row for row in legacy_rows if str(row.get("category", "")) == category
+                ]
+            return NewsletterRowsResult(rows=legacy_rows, batch_date_kst=requested, is_fallback=False)
     except OperationalError as exc:
         logger.critical(
             "DB 조회에 실패했습니다",
@@ -191,6 +268,18 @@ def list_newsletter_rows_for_batch(batch_date: date) -> List[Dict[str, Any]]:
             },
         )
         raise
+
+
+def list_newsletter_rows_for_batch(
+    batch_date: date,
+    *,
+    fallback_to_latest: bool = False,
+) -> List[Dict[str, Any]]:
+    """메일 뉴스레터용: batch_date_kst 우선, 없으면 created_at UTC 구간 폴백."""
+    return resolve_newsletter_rows_for_batch(
+        batch_date,
+        fallback_to_latest=fallback_to_latest,
+    ).rows
 
 
 def _mapping_row(r: Any) -> Dict[str, Any]:
