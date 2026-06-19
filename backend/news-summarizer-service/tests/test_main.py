@@ -7,6 +7,7 @@ Ports: User 8000, Mail 8002, Summarizer 8004.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from unittest.mock import patch
 
 import pytest
@@ -76,6 +77,60 @@ def test_internal_news_list_returns_public_shape(client: TestClient) -> None:
     assert any(item.get("title") == "Internal list headline" for item in body["items"])
     assert body["items"][0]["source"] == "IT/테크"
     assert body["items"][0]["desc"] == "Summary for internal list"
+    assert body["batch_date"] == "2026-05-21"
+    assert body["is_fallback"] is False
+
+
+def test_internal_news_list_falls_back_to_latest_batch_when_date_omitted(
+    client: TestClient,
+) -> None:
+    unique_link = f"https://example.com/news/{uuid.uuid4().hex}"
+    create_response = client.post(
+        "/news",
+        json={
+            "category": "스포츠",
+            "title": "Fallback headline",
+            "summary": "Fallback summary",
+            "link": unique_link,
+            "batch_date_kst": "2026-05-20",
+        },
+    )
+    assert create_response.status_code == 200
+
+    with patch("main._today_kst", return_value=date(2026, 5, 21)):
+        response = client.get("/internal/news/list", params={"category": "sports"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["batch_date"] == "2026-05-20"
+    assert body["is_fallback"] is True
+    assert any(item.get("title") == "Fallback headline" for item in body["items"])
+
+
+def test_internal_news_list_does_not_fallback_when_batch_date_is_explicit(
+    client: TestClient,
+) -> None:
+    unique_link = f"https://example.com/news/{uuid.uuid4().hex}"
+    create_response = client.post(
+        "/news",
+        json={
+            "category": "경제",
+            "title": "Explicit date should not see this",
+            "summary": "Older summary",
+            "link": unique_link,
+            "batch_date_kst": "2026-05-20",
+        },
+    )
+    assert create_response.status_code == 200
+
+    response = client.get(
+        "/internal/news/list",
+        params={"category": "economy", "batch_date": "2026-05-21"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"items": [], "batch_date": "2026-05-21", "is_fallback": False}
 
 
 def test_post_summarize_keeps_response_shape(client: TestClient) -> None:

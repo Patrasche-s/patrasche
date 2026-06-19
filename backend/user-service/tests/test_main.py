@@ -62,6 +62,8 @@ def test_api_news_list_passes_through_summarizer_items(
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
+        "batch_date": "2026-05-20",
+        "is_fallback": True,
         "items": [
             {
                 "source": "IT/테크",
@@ -80,6 +82,8 @@ def test_api_news_list_passes_through_summarizer_items(
     response = client.get("/api/news/list", params={"category": "tech"})
     assert response.status_code == 200
     assert response.json() == {
+        "batch_date": "2026-05-20",
+        "is_fallback": True,
         "items": [
             {
                 "source": "IT/테크",
