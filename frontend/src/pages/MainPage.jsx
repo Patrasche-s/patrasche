@@ -17,12 +17,21 @@ function extractUrl(desc) {
   return match ? match[0] : null
 }
 
+// "2026-05-20" → "5월 20일"
+function formatBatchDate(dateStr) {
+  if (!dateStr) return ''
+  const [, m, d] = dateStr.split('-')
+  return m && d ? `${Number(m)}월 ${Number(d)}일` : dateStr
+}
+
 export default function MainPage() {
   const [activeTab, setActiveTab] = useState('tech')
   const [news, setNews] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [hasNews, setHasNews] = useState({})
+  const [isFallback, setIsFallback] = useState(false)   
+  const [batchDate, setBatchDate] = useState('')        
 
   useEffect(() => {
     setIsLoading(true)
@@ -36,12 +45,16 @@ export default function MainPage() {
       .then(data => {
         const items = Array.isArray(data) ? data : data.items || []
         setNews(items)
+        setIsFallback(Boolean(data.is_fallback))   // 추가
+        setBatchDate(data.batch_date || '')        // 추가
         setHasNews(prev => ({ ...prev, [activeTab]: items.length > 0 }))
       })
       .catch(err => {
         console.error(err)
         setErrorMessage('뉴스를 불러오지 못했어요')
         setNews([])
+        setIsFallback(false)                        // 추가
+        setBatchDate('')                            // 추가
         setHasNews(prev => ({ ...prev, [activeTab]: false }))
       })
       .finally(() => setIsLoading(false))
@@ -80,7 +93,13 @@ export default function MainPage() {
             <p>{errorMessage || '아직 뉴스가 없어요'}</p>
           </div>
         ) : (
-          news.map((item, i) => {
+          <>
+          {isFallback && (
+            <div className={styles.fallbackBadge}>
+              🕐 {formatBatchDate(batchDate)} 배치예요. 오늘 뉴스는 준비 중이에요.
+            </div>
+          )}
+          {news.map((item, i) => {
             const url = extractUrl(item.desc)
             return (
               <div
@@ -98,7 +117,8 @@ export default function MainPage() {
                 <div className={styles.desc}>{item.desc}</div>
               </div>
             )
-          })
+          })}
+          </>
         )}
       </div>
     </div>
