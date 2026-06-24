@@ -32,7 +32,7 @@ from schemas import NewsCardItem, NewsSummaryEmailRequest, VerifyEmailRequest
 from settings import settings
 
 FETCH_BATCH_HOUR_KST = 11
-NEWSLETTER_CRON_HOUR_KST = 11
+NEWSLETTER_CRON_HOUR_KST = 15
 NEWSLETTER_CRON_MINUTE_KST = 45
 
 logger = setup_service_logging("mail-service")
