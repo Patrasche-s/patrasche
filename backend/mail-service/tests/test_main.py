@@ -72,3 +72,12 @@ def test_load_active_subscribers_calls_user_service_http() -> None:
             "unsubscribe_token": "unsub-test-token",
         },
     ]
+
+
+def test_newsletter_scheduler_runs_at_07_kst() -> None:
+    job = mail_main._configure_scheduler_jobs()
+    trigger_fields = {field.name: str(field) for field in job.trigger.fields}
+
+    assert str(job.trigger.timezone) == "Asia/Seoul"
+    assert trigger_fields["hour"] == "7"
+    assert trigger_fields["minute"] == "0"
