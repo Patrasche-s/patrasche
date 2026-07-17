@@ -1,64 +1,70 @@
 # Patrasche App
 
-Patrasche 앱 레포지토리는 RSS 뉴스 수집, 요약, 사용자 구독, 이메일 인증, 뉴스레터 발송 기능을 담당합니다. 프론트엔드는 React/Vite로 구성되어 있고, 백엔드는 기능별 FastAPI 서비스로 분리되어 있습니다.
+Patrasche는 RSS 뉴스를 수집·요약하고 사용자의 관심 카테고리에 맞춰 뉴스 목록과 이메일 알림을 제공한 팀 프로젝트입니다. 이 저장소는 React/Vite 프론트엔드, 기능별 FastAPI 서비스, 테스트와 애플리케이션 배포 자동화를 관리합니다.
 
-인프라 리소스와 Kubernetes 매니페스트는 인프라 레포지토리에서 관리하며, 이 레포지토리는 애플리케이션 코드, Docker 이미지 빌드, 테스트, 앱 배포 자동화를 담당합니다.
+> 프로젝트 운영은 종료되었으며 현재 라이브 데모를 제공하지 않습니다. 운영 Secret과 실제 환경 설정은 저장소에 포함하지 않습니다.
+
+- 애플리케이션 저장소: <https://github.com/Patrasche-s/patrasche-app>
+- 인프라 저장소: <https://github.com/Patrasche-s/patrasche-infra>
+
+## 서비스 흐름
+
+```mermaid
+flowchart LR
+    User[사용자] --> Web[React / Vite]
+    Web --> UserService[user-service]
+    UserService --> Mail[mail-service]
+    UserService --> Summarizer[news-summarizer-service]
+    Fetcher[news-fetcher-service] --> Summarizer
+    Fetcher --> RSS[RSS sources]
+    Fetcher --> S3[(S3 snapshots)]
+    UserService --> DB[(MySQL)]
+    Mail --> DB
+    Summarizer --> DB
+    Summarizer --> AI[Gemini API]
+```
 
 ## 주요 기능
 
-- 관심 카테고리 기반 사용자 구독
-- 이메일 인증과 구독 해지
-- RSS 뉴스 수집
-- 뉴스 요약과 조회 API 제공
-- 인증 메일과 뉴스레터 메일 발송
-- Jenkins 기반 이미지 빌드, ECR push, EKS 배포
-
-## 레포지토리 구조
-
-- `frontend/`: React/Vite 기반 웹 애플리케이션
-- `backend/`: FastAPI 백엔드 서비스와 Dockerfile
-- `backend/user-service`: 구독, 이메일 인증, 해지, 뉴스 목록 proxy
-- `backend/mail-service`: 인증 메일, 뉴스레터 발송, 발송 로그 저장
-- `backend/news-fetcher-service`: RSS 수집, summarizer 호출, S3 snapshot 업로드
-- `backend/news-summarizer-service`: 뉴스 요약, 저장, 조회 API
-- `ansible/`: EKS Deployment와 CronJob image tag 갱신 playbook
-- `Jenkinsfile-app`: 보안 스캔, lint/test, Docker build/push, EKS 배포 파이프라인
+- 관심 카테고리 기반 이메일 구독, 인증과 구독 해지
+- RSS 뉴스 수집과 원문 snapshot 저장
+- 생성형 AI를 활용한 뉴스 요약과 조회 API
+- 인증 메일 및 뉴스레터 발송과 발송 이력 관리
+- Docker 이미지 빌드, 보안 검사, 테스트와 EKS 배포 자동화
 
 ## 서비스 구성
 
 | Service | Port | 역할 |
-| --- | --- | --- |
-| `frontend` | 80 | 사용자 화면, 구독/인증/뉴스 조회 UI |
-| `user-service` | 8000 | 사용자 구독, 인증, 해지, 뉴스 목록 API |
-| `mail-service` | 8002 | 인증 메일, 뉴스레터 메일 발송 |
-| `news-fetcher-service` | 8003 | RSS 수집과 저장 흐름 실행 |
-| `news-summarizer-service` | 8004 | 뉴스 요약, 저장, 내부 조회 API |
+| --- | ---: | --- |
+| `frontend` | 80 | 구독, 인증과 뉴스 조회 UI |
+| `user-service` | 8000 | 구독, 인증, 해지와 뉴스 목록 API |
+| `mail-service` | 8002 | 인증 메일과 뉴스레터 발송 |
+| `news-fetcher-service` | 8003 | RSS 수집, 요약 요청과 S3 snapshot 업로드 |
+| `news-summarizer-service` | 8004 | 뉴스 요약, 저장과 내부 조회 API |
 
-## 배포 흐름
+## 저장소 구조
 
-1. Jenkins가 Gitleaks, Trivy, flake8, pytest를 실행합니다.
-2. 배포 대상 `IMAGE_TAG`를 40자리 Git SHA로 확정합니다.
-3. 프론트엔드와 백엔드 Docker 이미지를 빌드해 ECR에 push합니다.
-4. Ansible playbook이 EKS Deployment와 fetcher CronJob image tag를 갱신합니다.
-5. Kubernetes rollout을 통해 서비스 배포 상태를 확인합니다.
+```text
+.
+├── frontend/                  # React/Vite 웹 애플리케이션
+├── backend/                   # FastAPI 서비스와 Dockerfile
+├── ansible/                   # 프로젝트 당시 EKS 배포 playbook
+└── Jenkinsfile-app            # 검사, build, push와 배포 파이프라인
+```
 
-운영 프론트엔드 빌드는 `VITE_API_BASE_URL=https://api.patrasche.cloud` 값을 사용합니다.
+인프라 리소스, Kubernetes manifest와 플랫폼 구성은 [Patrasche Infra](https://github.com/Patrasche-s/patrasche-infra)에서 관리합니다.
 
-## 환경과 Secret
+## CI/CD 흐름
 
-로컬 실행에서는 서비스별 기본 SQLite DB 또는 README에 적힌 환경 변수를 사용할 수 있습니다. 운영 환경에서는 DB, SMTP, 외부 API key, 내부 token 값을 코드에 저장하지 않고, 인프라 레포의 SSM Parameter Store와 External Secrets Operator를 통해 Kubernetes Secret으로 주입합니다.
+1. Jenkins가 Gitleaks, Trivy, flake8와 pytest를 실행합니다.
+2. 배포할 `IMAGE_TAG`를 40자리 Git commit SHA로 고정합니다.
+3. 프론트엔드와 백엔드 이미지를 빌드해 Amazon ECR에 push합니다.
+4. Ansible playbook이 EKS Deployment와 fetcher CronJob의 image tag를 갱신합니다.
+5. Kubernetes rollout 상태를 확인해 배포 결과를 검증합니다.
 
-## 현재 검증 상태
+## 환경 변수와 Secret
 
-다음 항목은 현재 배포 환경에서 검증 완료된 상태입니다.
-
-- 앱 서비스 배포
-- RDS 연결
-- SSM / ExternalSecret / Kubernetes Secret 기반 환경 변수 주입 흐름
-- fetcher CronJob 테스트
-- 메일 발송 테스트
-- 주요 도메인/Ingress/API 라우팅 흐름
-- Jenkins 기반 앱 배포 흐름
+운영 환경의 DB, SMTP, 외부 API key와 내부 token 값은 애플리케이션 코드에 저장하지 않고 SSM Parameter Store와 External Secrets Operator를 통해 주입하도록 구성했습니다. 로컬 실행에 필요한 변수는 각 서비스 README를 참고하고 `.env` 파일은 Git에 커밋하지 않습니다.
 
 ## 로컬 실행 예시
 
@@ -79,4 +85,19 @@ alembic upgrade head
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-각 모듈의 자세한 실행 방법은 `frontend/README.md`, `backend/README.md`, 각 backend service README를 참고합니다.
+전체 백엔드 구조와 테스트 방법은 [`backend/README.md`](backend/README.md), 서비스별 환경 변수는 각 서비스 README에서 확인할 수 있습니다.
+
+## 프로젝트 기간 검증 범위
+
+- 프론트엔드와 네 개 FastAPI 서비스의 EKS 배포
+- RDS 연결과 서비스별 Alembic migration
+- RSS 수집, Gemini 요약과 S3 snapshot 저장
+- 이메일 인증, 뉴스레터 발송과 구독 해지
+- SSM / ExternalSecret / Kubernetes Secret 기반 설정 주입
+- Jenkins 기반 검사, 이미지 build/push와 rollout
+
+이 항목은 프로젝트 운영 기간에 검증한 결과를 정리한 것이며, 현재 라이브 환경의 가용성을 의미하지 않습니다.
+
+## Ansible 구현 범위
+
+`ansible/setup-addons.yml`과 관련 playbook은 프로젝트 당시의 EKS cluster, AWS region, domain과 Jenkins 실행 환경을 기준으로 작성한 구현 기록입니다. 특히 `setup-addons.yml`에는 AWS Load Balancer Controller 재설치 단계가 포함되어 있습니다. 범용 설치 도구로 제공하는 파일이 아니므로 다른 환경에서 실행하려면 변수, 권한과 task 흐름을 먼저 검토해야 합니다.
