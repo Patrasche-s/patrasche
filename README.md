@@ -1,6 +1,6 @@
 # Patrasche App
 
-Patrasche는 RSS 뉴스를 수집·요약하고 사용자의 관심 카테고리에 맞춰 뉴스 목록과 이메일 알림을 제공한 팀 프로젝트입니다. 이 저장소는 React/Vite 프론트엔드, 기능별 FastAPI 서비스, 테스트와 애플리케이션 배포 자동화를 관리합니다.
+Patrasche는 RSS 뉴스를 수집하고 요약해 관심 카테고리별 뉴스와 이메일 알림을 제공한 팀 프로젝트입니다. 이 저장소에는 React/Vite 프론트엔드와 기능별 FastAPI 서비스, 테스트 및 애플리케이션 배포 자동화 구성이 담겨 있습니다.
 
 > 프로젝트 운영은 종료되었으며 현재 라이브 데모를 제공하지 않습니다. 운영 Secret과 실제 환경 설정은 저장소에 포함하지 않습니다.
 
@@ -13,15 +13,25 @@ Patrasche는 RSS 뉴스를 수집·요약하고 사용자의 관심 카테고리
 flowchart LR
     User[사용자] --> Web[React / Vite]
     Web --> UserService[user-service]
-    UserService --> Mail[mail-service]
-    UserService --> Summarizer[news-summarizer-service]
-    Fetcher[news-fetcher-service] --> Summarizer
+
+    UserService -->|인증 메일 요청| Mail[mail-service]
+    UserService -->|뉴스 목록 조회| Summarizer[news-summarizer-service]
+
+    FetchCron[Kubernetes CronJob] --> Fetcher[news-fetcher-service]
     Fetcher --> RSS[RSS sources]
     Fetcher --> S3[(S3 snapshots)]
-    UserService --> DB[(MySQL)]
-    Mail --> DB
-    Summarizer --> DB
+    Fetcher -->|중복 확인·요약·저장 요청| Summarizer
     Summarizer --> AI[Gemini API]
+
+    MailScheduler[mail-service 내부 APScheduler] -->|뉴스레터 배치| Mail
+    Mail -->|구독자 조회| UserService
+    Mail -->|뉴스 조회| Summarizer
+    Mail --> SMTP[SMTP]
+    SMTP --> User
+
+    UserService -->|user_db| RDS[(RDS MySQL - 단일 인스턴스)]
+    Mail -->|mail_db| RDS
+    Summarizer -->|news_db| RDS
 ```
 
 ## 주요 기능
@@ -87,7 +97,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 전체 백엔드 구조와 테스트 방법은 [`backend/README.md`](backend/README.md), 서비스별 환경 변수는 각 서비스 README에서 확인할 수 있습니다.
 
-## 프로젝트 기간 검증 범위
+## 프로젝트에서 구현·검증한 내용
 
 - 프론트엔드와 네 개 FastAPI 서비스의 EKS 배포
 - RDS 연결과 서비스별 Alembic migration
@@ -96,7 +106,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - SSM / ExternalSecret / Kubernetes Secret 기반 설정 주입
 - Jenkins 기반 검사, 이미지 build/push와 rollout
 
-이 항목은 프로젝트 운영 기간에 검증한 결과를 정리한 것이며, 현재 라이브 환경의 가용성을 의미하지 않습니다.
+위 내용은 프로젝트 운영 당시 실제로 구현하고 검증한 범위이며, 현재는 라이브 환경을 제공하지 않습니다.
 
 ## Ansible 구현 범위
 
